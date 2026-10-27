@@ -191,5 +191,76 @@ struct EditorTypingTests {
 
         #expect(font(at: 0, in: textView)?.pointSize == 15)  // "Shopping" stays body text
     }
+
+    // MARK: Return and Backspace in quotes
+
+    /// Presses Return or Backspace like the keyboard does (through doCommandBy).
+    private func press(_ selector: Selector, in textView: NSTextView) {
+        textView.doCommand(by: selector)
+    }
+
+    private func lineHeight(at location: Int, in textView: NSTextView) throws -> CGFloat {
+        let layout = try #require(textView.textLayoutManager)
+        layout.ensureLayout(for: layout.documentRange)
+        let textLocation = try #require(layout.location(layout.documentRange.location, offsetBy: location))
+        return try #require(layout.textLayoutFragment(for: textLocation)).layoutFragmentFrame.height
+    }
+
+    @Test func returnInAQuoteContinuesItVisibly() async throws {
+        let (editor, folder) = try await editor(showing: "> test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+
+        #expect(textView.string == "> test\n> ")
+        #expect(textView.selectedRange() == NSRange(location: 9, length: 0))  // after the hidden "> "
+        #expect(hasAttribute(EditorTheme.quoteLineKey, at: 7, in: textView))  // the new line has the bar
+        #expect(try lineHeight(at: 7, in: textView) >= 18)                    // and full height, not collapsed
+        #expect((textView.typingAttributes[.font] as? NSFont)?.pointSize == 15)  // normal-size cursor and text
+
+        type("more", in: textView)
+        #expect(textView.string == "> test\n> more")
+        #expect(font(at: 9, in: textView)?.pointSize == 15)
+    }
+
+    @Test func secondReturnEndsTheQuote() async throws {
+        let (editor, folder) = try await editor(showing: "> test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        type("normal", in: textView)
+
+        #expect(textView.string == "> test\n\nnormal")
+        let normal = (textView.string as NSString).range(of: "normal").location
+        #expect(!hasAttribute(EditorTheme.quoteLineKey, at: normal, in: textView))  // back to a normal paragraph
+        #expect(font(at: normal, in: textView)?.pointSize == 15)
+    }
+
+    @Test func backspaceAtQuoteStartRemovesTheQuote() async throws {
+        let (editor, folder) = try await editor(showing: "> test")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+
+        press(#selector(NSResponder.deleteBackward(_:)), in: textView)
+
+        #expect(textView.string == "test")
+        #expect(textView.selectedRange() == NSRange(location: 0, length: 0))
+    }
+
+    @Test func cursorCannotStopInsideTheHiddenPrefix() async throws {
+        let (editor, folder) = try await editor(showing: "intro\n> quote")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+
+        textView.setSelectedRange(NSRange(location: 6, length: 0))  // start of the quote line, before "> "
+
+        #expect(textView.selectedRange() == NSRange(location: 8, length: 0))
+    }
 }
 

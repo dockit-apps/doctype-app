@@ -81,4 +81,31 @@ struct EditorSnapshotTests {
         let png = try #require(image.representation(using: .png, properties: [:]))
         try png.write(to: URL(fileURLWithPath: snapshotDirectory!).appending(path: "editor-\(variant).png"))
     }
+
+    /// The situation from the bug report: three quote lines, then Return.
+    @Test func renderQuoteAfterReturn() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "DocTypeSnapshot-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try "> test\n> test\n> test".write(to: folder.appending(path: "Quote.md"), atomically: true, encoding: .utf8)
+
+        let editor = EditorController()
+        editor.library = Library(root: folder)
+        #expect(await editor.open("Quote.md"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        editor.textView.setSelectedRange(NSRange(location: (editor.textView.string as NSString).length, length: 0))
+        editor.textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        editor.textView.insertText("new line", replacementRange: editor.textView.selectedRange())
+        if let layout = editor.textView.textLayoutManager { layout.ensureLayout(for: layout.documentRange) }
+        window.displayIfNeeded()
+
+        let view = editor.scrollView
+        let image = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: image)
+        let png = try #require(image.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: snapshotDirectory!).appending(path: "quote-after-return.png"))
+    }
 }
+

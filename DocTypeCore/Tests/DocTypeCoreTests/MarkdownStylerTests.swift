@@ -44,8 +44,8 @@ struct MarkdownStylerTests {
         expectSpans("```\ncode\nmore", [("```\ncode\nmore", .codeBlock), ("```\n", .syntaxMarker)])
     }
 
-    @Test func blockquoteDimsEveryQuoteMarker() {
-        expectSpans("> one\n> two", [("> one\n> two", .blockquote), ("> ", .syntaxMarker), ("> ", .syntaxMarker)])
+    @Test func blockquoteHidesEveryQuoteMarker() {
+        expectSpans("> one\n> two", [("> one\n> two", .blockquote), ("> ", .hiddenMarker), ("> ", .hiddenMarker)])
     }
 
     @Test func thematicBreakIsARuleWithAMarker() {
@@ -81,9 +81,9 @@ struct MarkdownStylerTests {
             .map { (string.substring(with: $0.range), string.substring(with: $0.revealRange!)) }
     }
 
-    @Test func headingAndQuoteMarkersRevealOnTheirOwnLine() {
-        let result = markers("# Title\nmore\n\n> one\n> two")
-        #expect(result.map(\.revealedBy) == ["# Title", "> one", "> two"])
+    @Test func headingMarkersRevealOnTheirOwnLine() {
+        let result = markers("# Title\nmore\n\n## Second")
+        #expect(result.map(\.revealedBy) == ["# Title", "## Second"])
     }
 
     @Test func fencesRevealAnywhereInTheirCodeBlock() {
@@ -188,7 +188,7 @@ struct ConfirmationTests {
 
     @Test func quoteMarkerIncludesTheSpaceSoTextStartsCleanly() {
         let text = "> text" as NSString
-        let marker = spans(text as String).first { $0.style == .syntaxMarker }
+        let marker = spans(text as String).first { $0.style == .hiddenMarker }
         #expect(marker.map { text.substring(with: $0.range) } == "> ")
     }
 

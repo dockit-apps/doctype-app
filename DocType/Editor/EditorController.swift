@@ -23,7 +23,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
-    @ObservationIgnored private let styler = StyleApplier()
+    @ObservationIgnored let styler = StyleApplier()
     @ObservationIgnored private let blockDecorations = BlockDecorations()
     @ObservationIgnored private(set) var path: String?
     @ObservationIgnored private var frontmatter: Frontmatter?

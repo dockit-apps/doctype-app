@@ -10,6 +10,9 @@ public enum Style: Hashable, Sendable {
     /// Markdown syntax (`#`, `>`, fences, `**`, …). Shown dimmed while the cursor
     /// is inside the span's `revealRange`, hidden otherwise (like Obsidian).
     case syntaxMarker
+    /// Syntax that's always hidden because a drawing replaces it: the quote bar
+    /// replaces "> ", so its text lines up with the line above.
+    case hiddenMarker
     /// The lines of a code block (monospace, drawn as a box).
     case codeBlock
     /// A syntax-highlighted token inside a fenced code block.

@@ -177,7 +177,9 @@ private struct SpanCollector: MarkupWalker {
             let line = source.substring(with: lineRange) as NSString
             let quote = line.range(of: "^ {0,3}(> ?)+", options: .regularExpression)
             if quote.location != NSNotFound {
-                marker(NSRange(location: lineRange.location + quote.location, length: quote.length))
+                // Always hidden: the quote bar shows instead (see QuoteEditing).
+                markerSpans.append(StyleSpan(shifted(NSRange(location: lineRange.location + quote.location,
+                                                             length: quote.length)), .hiddenMarker))
             }
         }
         descendInto(blockQuote)

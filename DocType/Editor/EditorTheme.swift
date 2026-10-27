@@ -18,7 +18,7 @@ enum EditorTheme {
     static let quoteIndent: CGFloat = 18
 
     /// Hidden markdown syntax: kept in the text, but takes no visible space.
-    private static let concealedAttributes: [NSAttributedString.Key: Any] = [
+    static let concealedAttributes: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: 0.1),
         .foregroundColor: NSColor.clear,
     ]
@@ -54,7 +54,7 @@ enum EditorTheme {
                 }
             case .horizontalRule:
                 applyToLines(span.range, of: text) { _ in [.paragraphStyle: ruleParagraphStyle, ruleLineKey: true] }
-            case .syntaxMarker where !span.isRevealed(by: selection):
+            case .syntaxMarker where !span.isRevealed(by: selection), .hiddenMarker:
                 text.addAttributes(concealedAttributes, range: span.range)
             default:
                 text.addAttributes(attributes(for: span.style), range: span.range)
@@ -74,7 +74,7 @@ enum EditorTheme {
             [.foregroundColor: color(for: token)]
         case .blockquote:
             [.foregroundColor: NSColor.secondaryLabelColor]
-        case .horizontalRule:
+        case .horizontalRule, .hiddenMarker:
             [:]
         }
     }
@@ -82,6 +82,8 @@ enum EditorTheme {
     private static let quoteParagraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 3
+        // A new quote line holds only the hidden "> "; keep it full height.
+        style.minimumLineHeight = 18
         style.firstLineHeadIndent = quoteIndent
         style.headIndent = quoteIndent
         return style
