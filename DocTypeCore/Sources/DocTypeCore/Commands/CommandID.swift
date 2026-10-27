@@ -14,6 +14,19 @@ public enum CommandID: String, CaseIterable, Sendable {
     case trashNote = "note.trash"
     case renameNotebook = "notebook.rename"
     case toggleSidebar = "view.toggleSidebar"
+    case find = "edit.find"
+    case findAndReplace = "edit.findAndReplace"
+    case findNext = "edit.findNext"
+    case findPrevious = "edit.findPrevious"
+    case bold = "format.bold"
+    case italic = "format.italic"
+    case inlineCode = "format.inlineCode"
+    case link = "format.link"
+    case heading1 = "format.heading1"
+    case heading2 = "format.heading2"
+    case heading3 = "format.heading3"
+    case bodyText = "format.bodyText"
+    case taskItem = "format.taskItem"
 }
 
 /// The top-level menu a command appears in.
@@ -54,6 +67,32 @@ extension CommandID {
             Info(title: "Rename Notebook…", menu: .file, defaultShortcuts: [])
         case .toggleSidebar:
             Info(title: "Toggle Sidebar", menu: .view, defaultShortcuts: [.command("s", [.control])])
+        case .find:
+            Info(title: "Find…", menu: .edit, defaultShortcuts: [.command("f")])
+        case .findAndReplace:
+            Info(title: "Find and Replace…", menu: .edit, defaultShortcuts: [.command("f", .option)])
+        case .findNext:
+            Info(title: "Find Next", menu: .edit, defaultShortcuts: [.command("g")])
+        case .findPrevious:
+            Info(title: "Find Previous", menu: .edit, defaultShortcuts: [.command("g", .shift)])
+        case .bold:
+            Info(title: "Bold", menu: .format, defaultShortcuts: [.command("b")])
+        case .italic:
+            Info(title: "Italic", menu: .format, defaultShortcuts: [.command("i")])
+        case .inlineCode:
+            Info(title: "Inline Code", menu: .format, defaultShortcuts: [.command("e")])
+        case .link:
+            Info(title: "Link", menu: .format, defaultShortcuts: [.command("k", .shift)])
+        case .heading1:
+            Info(title: "Heading 1", menu: .format, defaultShortcuts: [.command("1", .option)])
+        case .heading2:
+            Info(title: "Heading 2", menu: .format, defaultShortcuts: [.command("2", .option)])
+        case .heading3:
+            Info(title: "Heading 3", menu: .format, defaultShortcuts: [.command("3", .option)])
+        case .bodyText:
+            Info(title: "Body Text", menu: .format, defaultShortcuts: [.command("0", .option)])
+        case .taskItem:
+            Info(title: "Task Item", menu: .format, defaultShortcuts: [.command("l", .shift)])
         }
     }
 

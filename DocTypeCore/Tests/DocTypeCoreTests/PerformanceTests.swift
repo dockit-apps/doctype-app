@@ -37,7 +37,9 @@ struct PerformanceTests {
         print("Styled whole 5,000-line note in \(open)")
 
         // Type 300 characters at a paragraph in the middle, like a user would.
-        var location = text.range(of: "Section", range: NSRange(location: text.length / 2, length: text.length / 2)).location
+        let section = text.range(of: "Section", range: NSRange(location: text.length / 2, length: text.length / 2))
+        try #require(section.location != NSNotFound, "Big/5000-lines.md isn't the generated fixture; regenerate it")
+        var location = section.location
         var timings: [Duration] = []
         for character in String(repeating: "typing more words ", count: 17).prefix(300) {
             let insert = String(character)
