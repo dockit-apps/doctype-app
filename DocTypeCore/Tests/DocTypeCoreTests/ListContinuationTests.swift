@@ -75,9 +75,26 @@ struct ListContinuationTests {
         #expect(pressReturn("- one\n- |") == "- one\n|")
         #expect(pressReturn("1. one\n2. |") == "1. one\n|")
         #expect(pressReturn("- [ ] one\n- [ ] |") == "- [ ] one\n|")
-        #expect(pressReturn("- one\n  - |") == "- one\n  |")  // indentation stays; the line is blank
         #expect(pressReturn("> - one\n> - |") == "> - one\n> |")  // still in the quote; the next Return ends it
         #expect(pressReturn("- one\n-   |") == "- one\n|")  // trailing spaces don't count as text
+    }
+
+    @Test func returnOnAnEmptyNestedItemMovesItUpOneLevel() {
+        #expect(pressReturn("- groceries\n  - milk\n  - |") == "- groceries\n  - milk\n- |")
+        #expect(pressReturn("- [ ] a\n  - [ ] b\n  - [ ] |") == "- [ ] a\n  - [ ] b\n- [ ] |")
+        #expect(pressReturn("1. a\n   1. x\n   2. |\n2. b") == "1. a\n   1. x\n2. |\n3. b")  // numbered after its parent
+        #expect(pressReturn("> - a\n>   - |") == "> - a\n> - |")
+    }
+
+    @Test func eachEmptyReturnClimbsOneLevelUntilTheListEnds() {
+        var text = "- a\n  - b\n    - c\n    - |"
+        var steps: [String] = []
+        while let next = pressReturn(text) {
+            steps.append(next)
+            text = next
+            if steps.count > 5 { break }
+        }
+        #expect(steps == ["- a\n  - b\n    - c\n  - |", "- a\n  - b\n    - c\n- |", "- a\n  - b\n    - c\n|"])
     }
 
     @Test func returnBeforeTheItemTextIsNormal() {

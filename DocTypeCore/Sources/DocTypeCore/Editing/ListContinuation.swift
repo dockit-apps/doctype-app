@@ -4,17 +4,19 @@
 //   the next number, and an unchecked box for tasks. Text after the cursor moves
 //   into the new item. Numbered items below that would now repeat a number are
 //   renumbered in the same edit.
-// - Return on an empty item ends the list: the marker is removed and the cursor
-//   stays on the now-empty line.
+// - Return on an empty nested item moves it up one level (like Shift-Tab, see
+//   ListIndentation); on an empty top-level item it ends the list: the marker is
+//   removed and the cursor stays on the now-empty line. So each Return on an empty
+//   item climbs one level until you're out of the list.
 // - A "> " quote prefix is kept, so lists inside quotes continue too.
 // - Backspace right after a task's box turns the task back into a plain item.
 // - The cursor never stops inside a task's "- [ ] " (it's hidden behind the drawn
 //   checkbox), the same way QuoteEditing keeps it out of "> ".
 //
-// Alternatives considered: on an empty nested item, outdent one level (Obsidian)
-// instead of ending the list — nicer for deep lists but needs the parent's marker
-// and indentation; Tab/Shift-Tab can cover that later. Not renumbering at all is
-// simpler but leaves "1. 2. 2. 3." after inserting in the middle.
+// Alternatives considered: ending the list from any level on the first empty
+// Return (what this did first) leaves an indented non-list line that markdown
+// joins onto the item above it. Not renumbering at all is simpler but leaves
+// "1. 2. 2. 3." after inserting in the middle.
 
 import Foundation
 
@@ -24,7 +26,10 @@ public enum ListContinuation {
         guard let item = listItem(at: selection.location, in: text, blockMap: blockMap),
               selection.location >= item.contentStart, NSMaxRange(selection) <= NSMaxRange(item.range) else { return nil }
         if item.isEmpty {
-            // Return on an empty item: drop the marker, keep any quote prefix.
+            // Return on an empty nested item: up one level, as Shift-Tab does.
+            if let outdent = ListIndentation.edit(.outdent, in: text, selection: selection, blockMap: blockMap),
+               !outdent.isNoChange { return outdent }
+            // On an empty top-level item: drop the marker, keep any quote prefix.
             let marker = NSRange(location: item.markerStart, length: NSMaxRange(item.range) - item.markerStart)
             return TextEdit(range: marker, replacement: "",
                             selectionAfter: NSRange(location: item.markerStart, length: 0))

@@ -415,4 +415,21 @@ struct EditorTypingTests {
 
         #expect(textView.string == "text\t")
     }
+
+    @Test func returnOnAnEmptyNestedItemMovesItUpThenEndsTheList() async throws {
+        let (editor, folder) = try await editor(showing: "- groceries\n  - milk")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 20, length: 0))
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)  // "  - "
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)  // up a level: "- "
+        type("eggs", in: textView)
+        #expect(textView.string == "- groceries\n  - milk\n- eggs")
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)  // empty top-level item: list ends
+        type("done", in: textView)
+        #expect(textView.string == "- groceries\n  - milk\n- eggs\ndone")
+    }
 }
