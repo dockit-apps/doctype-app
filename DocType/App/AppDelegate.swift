@@ -18,9 +18,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menus can show only one shortcut per item; extra ones (⇧⌘P for the
-        // palette) are caught here and run the same command.
+        // palette) are caught here and run the same command. Escape for the
+        // palette is handled here too, so it works wherever the focus is.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if event.keyCode == 53, model.palette != nil {
+                model.dismissPalette()
+                return nil
+            }
             for command in CommandID.allCases {
                 if command.info.defaultShortcuts.dropFirst().contains(where: { $0.matches(event) }) {
                     model.commands.run(command)

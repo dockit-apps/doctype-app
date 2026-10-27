@@ -37,7 +37,12 @@ struct CommandPaletteView: View {
         .frame(width: 520)
         .glassEffect(.regular, in: .rect(cornerRadius: 16))
         .onChange(of: query) { selectedIndex = 0 }
-        .onAppear { isFieldFocused = true }
+        .onAppear {
+            // The editor (an AppKit view) still has focus at this point and would keep
+            // it; ask again on the next turn of the run loop, once the palette is shown.
+            isFieldFocused = true
+            Task { isFieldFocused = true }
+        }
     }
 
     private var list: some View {

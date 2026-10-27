@@ -79,7 +79,11 @@ final class AppModel {
     }
 
     func showPalette(_ palette: Palette) {
-        if self.palette == nil { focusBeforePalette = NSApp.keyWindow?.firstResponder }
+        if self.palette == nil {
+            focusBeforePalette = NSApp.keyWindow?.firstResponder
+            // Let go of the editor's focus, so typing goes to the palette's field.
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
         self.palette = palette
     }
 
