@@ -36,20 +36,20 @@ struct MarkdownStylerTests {
     @Test func fencedCodeIsMonospaceHighlightedWithDimmedFences() {
         expectSpans("```swift\nlet a = 1\n```\n\n", [
             ("```swift\nlet a = 1\n```", .codeBlock), ("let", .code(.keyword)), ("1", .code(.number)),
-            ("```swift", .syntaxMarker), ("```", .syntaxMarker),
+            ("```swift\n", .syntaxMarker), ("```\n", .syntaxMarker),
         ])
     }
 
     @Test func unclosedFenceStylesToTheEnd() {
-        expectSpans("```\ncode\nmore", [("```\ncode\nmore", .codeBlock), ("```", .syntaxMarker)])
+        expectSpans("```\ncode\nmore", [("```\ncode\nmore", .codeBlock), ("```\n", .syntaxMarker)])
     }
 
     @Test func blockquoteDimsEveryQuoteMarker() {
         expectSpans("> one\n> two", [("> one\n> two", .blockquote), ("> ", .syntaxMarker), ("> ", .syntaxMarker)])
     }
 
-    @Test func thematicBreakIsDimmed() {
-        expectSpans("para\n\n---\n", [("---", .syntaxMarker)])
+    @Test func thematicBreakIsARuleWithAMarker() {
+        expectSpans("para\n\n---\n", [("---", .horizontalRule), ("---", .syntaxMarker)])
     }
 
     @Test func dashesUnderAParagraphAreASetextHeadingNotARule() {
@@ -70,6 +70,38 @@ struct MarkdownStylerTests {
         let result = await MarkdownStyler.styleDocument("# A\n\n```\nb\n```")
         #expect(result.blockMap.blocks.count == 2)
         #expect(result.spans.contains { $0.style == .codeBlock })
+    }
+
+    // MARK: Reveal ranges (markers hide unless the cursor is there)
+
+    private func markers(_ text: String) -> [(marker: String, revealedBy: String)] {
+        let string = text as NSString
+        return MarkdownStyler.spans(in: string, blocks: BlockMap(text: string).blocks)
+            .filter { $0.style == .syntaxMarker }
+            .map { (string.substring(with: $0.range), string.substring(with: $0.revealRange!)) }
+    }
+
+    @Test func headingAndQuoteMarkersRevealOnTheirOwnLine() {
+        let result = markers("# Title\nmore\n\n> one\n> two")
+        #expect(result.map(\.revealedBy) == ["# Title", "> one", "> two"])
+    }
+
+    @Test func fencesRevealAnywhereInTheirCodeBlock() {
+        let result = markers("```swift\nlet a = 1\n```\n\nafter")
+        #expect(result.map(\.revealedBy) == ["```swift\nlet a = 1\n```", "```swift\nlet a = 1\n```"])
+    }
+
+    @Test func setextUnderlineRevealsOnEitherLineOfTheHeading() {
+        #expect(markers("Title\n=====\n").map(\.revealedBy) == ["Title\n====="])
+    }
+
+    @Test func revealCheckCountsTouchingTheEdges() {
+        let span = StyleSpan(NSRange(location: 0, length: 2), .syntaxMarker, revealRange: NSRange(location: 0, length: 7))
+        #expect(span.isRevealed(by: NSRange(location: 7, length: 0)))   // cursor at line end
+        #expect(!span.isRevealed(by: NSRange(location: 8, length: 0)))  // next line
+        #expect(span.isRevealed(by: NSRange(location: 8, length: 0)) == false)
+        #expect(span.isRevealed(by: NSRange(location: 3, length: 20)))  // selection across
+        #expect(StyleSpan(NSRange(location: 0, length: 1), .heading(level: 1)).isRevealed(by: NSRange(location: 99, length: 0)))
     }
 
     @Test func plainParagraphHasNoSpans() {

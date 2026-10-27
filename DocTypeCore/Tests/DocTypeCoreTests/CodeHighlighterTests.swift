@@ -71,7 +71,7 @@ struct CodeHighlighterTests {
         let spans = MarkdownStyler.spans(in: text, blocks: BlockMap(text: text).blocks)
         let styles = spans.map { (text.substring(with: $0.range), $0.style) }
         #expect(styles.contains { $0 == ("let", .code(.keyword)) })
-        #expect(styles.contains { $0 == ("```swift", .syntaxMarker) })
+        #expect(styles.contains { $0 == ("```swift\n", .syntaxMarker) })
         #expect(!styles.contains { $0.0 == "swift" && $0.1 == .code(.keyword) })  // the info string isn't code
     }
 }

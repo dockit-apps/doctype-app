@@ -1,24 +1,71 @@
-// Draws code blocks as one rounded, full-width box, like code in chat apps.
+// Draws block decorations behind the text, the way chat apps and Obsidian do:
+// code blocks as one rounded box, block quotes with a bar on the left, and
+// `---` lines as a horizontal rule.
 //
 // TextKit 2 lays out each paragraph in its own layout fragment. For lines that
-// EditorTheme marked as code, this delegate returns a fragment that paints the
-// box behind its text: rounded top corners on the first line, rounded bottom
-// corners on the last, straight edges in between, so the lines join up.
+// EditorTheme marked, this delegate returns a fragment subclass that paints the
+// decoration and then draws the text on top.
 
 import AppKit
 
-final class CodeBlockLayout: NSObject, NSTextLayoutManagerDelegate {
+final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
     func textLayoutManager(
         _ textLayoutManager: NSTextLayoutManager, textLayoutFragmentFor location: NSTextLocation,
         in textElement: NSTextElement
     ) -> NSTextLayoutFragment {
         let range = textElement.elementRange
-        if let paragraph = textElement as? NSTextParagraph, paragraph.attributedString.length > 0,
-           let raw = paragraph.attributedString.attribute(EditorTheme.codeBlockLineKey, at: 0, effectiveRange: nil) as? Int,
-           let position = CodeBlockLinePosition(rawValue: raw) {
+        guard let paragraph = textElement as? NSTextParagraph, paragraph.attributedString.length > 0 else {
+            return NSTextLayoutFragment(textElement: textElement, range: range)
+        }
+        let attributes = paragraph.attributedString.attributes(at: 0, effectiveRange: nil)
+        if let raw = attributes[EditorTheme.codeBlockLineKey] as? Int, let position = CodeBlockLinePosition(rawValue: raw) {
             return CodeBlockLayoutFragment(textElement: textElement, range: range, position: position)
         }
+        if attributes[EditorTheme.quoteLineKey] != nil {
+            return QuoteLayoutFragment(textElement: textElement, range: range)
+        }
+        if attributes[EditorTheme.ruleLineKey] != nil {
+            return RuleLayoutFragment(textElement: textElement, range: range)
+        }
         return NSTextLayoutFragment(textElement: textElement, range: range)
+    }
+}
+
+/// A bar on the left edge of each quoted line; the lines' bars join into one.
+nonisolated final class QuoteLayoutFragment: NSTextLayoutFragment {
+    private static let barWidth: CGFloat = 3
+    private static let color = NSColor.tertiaryLabelColor
+
+    private var barRect: CGRect {
+        CGRect(x: -layoutFragmentFrame.minX + 2, y: 0, width: Self.barWidth, height: layoutFragmentFrame.height)
+    }
+
+    override var renderingSurfaceBounds: CGRect { super.renderingSurfaceBounds.union(barRect) }
+
+    override func draw(at point: CGPoint, in context: CGContext) {
+        context.saveGState()
+        context.setFillColor(Self.color.cgColor)
+        context.fill(barRect.offsetBy(dx: point.x, dy: point.y))
+        context.restoreGState()
+        super.draw(at: point, in: context)
+    }
+}
+
+/// A thin line across the full width, vertically centered in the `---` line.
+nonisolated final class RuleLayoutFragment: NSTextLayoutFragment {
+    private var lineRect: CGRect {
+        let width = textLayoutManager?.textContainer?.size.width ?? layoutFragmentFrame.maxX
+        return CGRect(x: -layoutFragmentFrame.minX, y: (layoutFragmentFrame.height / 2).rounded(), width: width, height: 1)
+    }
+
+    override var renderingSurfaceBounds: CGRect { super.renderingSurfaceBounds.union(lineRect) }
+
+    override func draw(at point: CGPoint, in context: CGContext) {
+        context.saveGState()
+        context.setFillColor(NSColor.separatorColor.cgColor)
+        context.fill(lineRect.offsetBy(dx: point.x, dy: point.y))
+        context.restoreGState()
+        super.draw(at: point, in: context)
     }
 }
 

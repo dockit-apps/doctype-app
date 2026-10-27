@@ -58,9 +58,14 @@ public enum MarkdownStyler {
         let codeStop = max(codeStart, closing?.start ?? codeEnd)
         spans += CodeHighlighter.spans(in: text, range: NSRange(location: codeStart, length: codeStop - codeStart),
                                        language: fence.info)
-        spans.append(StyleSpan(NSRange(location: opening.start, length: opening.content.length), .syntaxMarker))
+        // Fences show while the cursor is anywhere in the block. They include their
+        // line break, so a hidden fence line takes no height.
+        let blockRange = NSRange(location: block.range.location, length: codeEnd - block.range.location)
+        spans.append(StyleSpan(NSRange(location: opening.start, length: opening.end - opening.start), .syntaxMarker,
+                               revealRange: blockRange))
         if let closing {
-            spans.append(StyleSpan(NSRange(location: closing.start, length: closing.content.length), .syntaxMarker))
+            spans.append(StyleSpan(NSRange(location: closing.start, length: closing.end - closing.start), .syntaxMarker,
+                                   revealRange: blockRange))
         }
         return spans
     }
@@ -88,9 +93,18 @@ private struct SpanCollector: MarkupWalker {
         markup.range.map { mapping.range(of: $0, base: 0) }
     }
 
-    private mutating func marker(_ local: NSRange) {
+    /// Adds a marker that shows while the cursor is on its line (or in `revealIn`).
+    private mutating func marker(_ local: NSRange, revealIn reveal: NSRange? = nil) {
         guard local.length > 0 else { return }
-        markerSpans.append(StyleSpan(NSRange(location: base + local.location, length: local.length), .syntaxMarker))
+        let line = reveal ?? lineWithoutBreak(containing: local.location)
+        markerSpans.append(StyleSpan(NSRange(location: base + local.location, length: local.length), .syntaxMarker,
+                                     revealRange: NSRange(location: base + line.location, length: line.length)))
+    }
+
+    private func lineWithoutBreak(containing location: Int) -> NSRange {
+        var start = 0, contentsEnd = 0
+        source.getLineStart(&start, end: nil, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
+        return NSRange(location: start, length: contentsEnd - start)
     }
 
     private mutating func container(_ local: NSRange, _ style: Style) {
@@ -118,7 +132,8 @@ private struct SpanCollector: MarkupWalker {
             // Setext heading: the ==== or ---- underline is the last line of the range.
             let lastLine = source.lineRange(for: NSRange(location: max(range.upperBound - 1, range.location), length: 0))
             let underline = (source.substring(with: lastLine) as NSString).trimmingCharacters(in: .newlines) as NSString
-            marker(NSRange(location: lastLine.location, length: underline.length))
+            marker(NSRange(location: lastLine.location, length: underline.length),
+                   revealIn: NSRange(location: range.location, length: lastLine.location + underline.length - range.location))
         }
     }
 
@@ -142,7 +157,9 @@ private struct SpanCollector: MarkupWalker {
 
     mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) {
         guard let range = localRange(thematicBreak) else { return }
-        marker(NSRange(location: range.location, length: trimmedLength(range)))
+        let line = NSRange(location: range.location, length: trimmedLength(range))
+        container(line, .horizontalRule)
+        marker(line)
     }
 
     /// Code that swift-markdown finds inside a text block: indented code, or a

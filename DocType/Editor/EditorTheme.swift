@@ -8,8 +8,20 @@ enum EditorTheme {
     static let bodyFont = NSFont.systemFont(ofSize: 15)
     static let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
-    /// Marks a line inside a code block and where it sits, for CodeBlockLayout.
+    /// Marks a line inside a code block and where it sits, for BlockDecorations.
     static let codeBlockLineKey = NSAttributedString.Key("DocTypeCodeBlockLine")
+    /// Marks a line inside a block quote (drawn with a bar on the left).
+    static let quoteLineKey = NSAttributedString.Key("DocTypeQuoteLine")
+    /// Marks a `---` line (drawn as a horizontal rule).
+    static let ruleLineKey = NSAttributedString.Key("DocTypeRuleLine")
+    /// Space between the quote bar and the quoted text.
+    static let quoteIndent: CGFloat = 18
+
+    /// Hidden markdown syntax: kept in the text, but takes no visible space.
+    private static let concealedAttributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 0.1),
+        .foregroundColor: NSColor.clear,
+    ]
     /// Inner padding of the code block box.
     static let codeBlockPadding: CGFloat = 12
 
@@ -26,13 +38,24 @@ enum EditorTheme {
         .paragraphStyle: paragraphStyle,
     ]
 
-    /// Resets `range` and applies `spans` (which must lie inside it).
-    static func apply(_ spans: [StyleSpan], to text: NSMutableAttributedString, resetting range: NSRange) {
+    /// Resets `range` and applies `spans` (which must lie inside it). Markers the
+    /// `selection` doesn't reveal are hidden.
+    static func apply(_ spans: [StyleSpan], to text: NSMutableAttributedString, resetting range: NSRange,
+                      selection: NSRange) {
         text.setAttributes(baseAttributes, range: range)
         for span in spans {
-            if span.style == .codeBlock {
+            switch span.style {
+            case .codeBlock:
                 applyCodeBlock(span.range, to: text)
-            } else {
+            case .blockquote:
+                applyToLines(span.range, of: text) { _ in
+                    [.foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: quoteParagraphStyle, quoteLineKey: true]
+                }
+            case .horizontalRule:
+                applyToLines(span.range, of: text) { _ in [.paragraphStyle: ruleParagraphStyle, ruleLineKey: true] }
+            case .syntaxMarker where !span.isRevealed(by: selection):
+                text.addAttributes(concealedAttributes, range: span.range)
+            default:
                 text.addAttributes(attributes(for: span.style), range: span.range)
             }
         }
@@ -50,6 +73,35 @@ enum EditorTheme {
             [.foregroundColor: color(for: token)]
         case .blockquote:
             [.foregroundColor: NSColor.secondaryLabelColor]
+        case .horizontalRule:
+            [:]
+        }
+    }
+
+    private static let quoteParagraphStyle: NSParagraphStyle = {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 3
+        style.firstLineHeadIndent = quoteIndent
+        style.headIndent = quoteIndent
+        return style
+    }()
+
+    /// Keeps a rule's line full height even when its `---` is hidden.
+    private static let ruleParagraphStyle: NSParagraphStyle = {
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = 22
+        return style
+    }()
+
+    /// Adds attributes to every whole line (paragraph) that `range` touches.
+    private static func applyToLines(_ range: NSRange, of text: NSMutableAttributedString,
+                                     _ attributes: (Int) -> [NSAttributedString.Key: Any]) {
+        var lines: [NSRange] = []
+        text.mutableString.enumerateSubstrings(in: range, options: [.byParagraphs, .substringNotRequired]) { _, _, enclosing, _ in
+            lines.append(enclosing)
+        }
+        for (index, line) in lines.enumerated() {
+            text.addAttributes(attributes(index), range: NSIntersectionRange(line, NSRange(location: 0, length: text.length)))
         }
     }
 

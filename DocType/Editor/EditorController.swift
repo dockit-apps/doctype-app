@@ -24,7 +24,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
     @ObservationIgnored private let styler = StyleApplier()
-    @ObservationIgnored private let codeBlockLayout = CodeBlockLayout()
+    @ObservationIgnored private let blockDecorations = BlockDecorations()
     @ObservationIgnored private(set) var path: String?
     @ObservationIgnored private var frontmatter: Frontmatter?
     /// The note's full text as we last loaded it from or saved it to disk.
@@ -42,7 +42,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.delegate = self
         styler.textView = textView
         textView.textStorage?.delegate = styler
-        textView.textLayoutManager?.delegate = codeBlockLayout
+        textView.textLayoutManager?.delegate = blockDecorations
         textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
     }
 
@@ -85,7 +85,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
         lastSyncedText = ""
         isDirty = false
         if let storage = textView.textStorage {
-            styler.replaceDocument(in: storage, text: "", blockMap: BlockMap(), spans: [])
+            styler.replaceDocument(in: storage, text: "", blockMap: BlockMap(), spans: [],
+                                   selection: NSRange(location: 0, length: 0))
         }
         textView.undoManager?.removeAllActions()
     }
@@ -230,8 +231,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Puts a prepared note into the editor without registering undo.
     /// When reloading the same note, the caret and scroll position stay put.
     private func show(_ note: PreparedNote, keepingPosition: Bool) {
-        let selection = textView.selectedRange()
         let scrollOrigin = scrollView.contentView.bounds.origin
+        let length = (note.body as NSString).length
+        let selection = keepingPosition
+            ? NSRange(location: min(textView.selectedRange().location, length), length: 0)
+            : NSRange(location: 0, length: 0)
 
         frontmatter = note.frontmatter
         tags = note.frontmatter?.tags ?? []
@@ -239,18 +243,16 @@ final class EditorController: NSObject, NSTextViewDelegate {
         isDirty = false
         autosaveTask?.cancel()
         if let storage = textView.textStorage {
-            styler.replaceDocument(in: storage, text: note.body, blockMap: note.blockMap, spans: note.spans)
+            styler.replaceDocument(in: storage, text: note.body, blockMap: note.blockMap, spans: note.spans,
+                                   selection: selection)
         }
         // Clearing makes ⌘Z never reach text from another note or version.
         textView.undoManager?.removeAllActions()
-
+        textView.setSelectedRange(selection)
         if keepingPosition {
-            let length = (textView.string as NSString).length
-            textView.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
         } else {
-            textView.setSelectedRange(NSRange(location: 0, length: 0))
             textView.scrollToBeginningOfDocument(nil)
         }
     }
@@ -261,6 +263,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
         isDirty = true
         if let storage = textView.textStorage { styler.applyPendingStyles(in: storage) }
         scheduleAutosave()
+    }
+
+    /// The cursor moved: show the markdown syntax on its line, hide it elsewhere.
+    func textViewDidChangeSelection(_ notification: Notification) {
+        if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
     }
 
     private func scheduleAutosave() {

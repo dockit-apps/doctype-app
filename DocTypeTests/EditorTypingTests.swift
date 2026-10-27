@@ -77,5 +77,64 @@ struct EditorTypingTests {
         #expect(storage.attribute(EditorTheme.codeBlockLineKey, at: varLocation, effectiveRange: nil) != nil)  // inside the box
         #expect(font(at: varLocation, in: textView)?.isFixedPitch == true)
     }
+
+    // MARK: Hidden syntax (shown only on the cursor's line)
+
+    /// Moves the cursor and lets the run loop deliver the selection change,
+    /// which TextKit 2 posts a moment later.
+    private func moveCursor(to location: Int, in textView: NSTextView) async throws {
+        textView.setSelectedRange(NSRange(location: location, length: 0))
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
+    private func isHidden(at location: Int, in textView: NSTextView) -> Bool {
+        (font(at: location, in: textView)?.pointSize ?? 99) < 1
+    }
+
+    @Test func headingMarkerShowsOnItsLineAndHidesAfterReturn() async throws {
+        let (editor, folder) = try await editor(showing: "")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        type("# Title", in: textView)
+        #expect(!isHidden(at: 0, in: textView))  // still on the heading line
+
+        type("\nBody", in: textView)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(isHidden(at: 0, in: textView))   // moved away: "#" hidden
+        #expect(font(at: 2, in: textView)?.pointSize == 26)  // the title keeps heading size
+
+        try await moveCursor(to: 3, in: textView)  // back onto the heading
+        #expect(!isHidden(at: 0, in: textView))
+    }
+
+    @Test func typedCodeBlockHidesFencesAfterLeavingIt() async throws {
+        let (editor, folder) = try await editor(showing: "")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        type("```swift\nlet a = 1\n```\nAfter", in: textView)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(isHidden(at: 0, in: textView))   // "```swift" hidden: cursor is below the block
+        let codeLocation = (textView.string as NSString).range(of: "let").location
+        #expect(!isHidden(at: codeLocation, in: textView))  // the code itself stays visible
+
+        try await moveCursor(to: codeLocation, in: textView)  // into the block
+        #expect(!isHidden(at: 0, in: textView))  // fences and language show again
+    }
+
+    @Test func quoteMarkerHidesAndLinesGetTheQuoteBar() async throws {
+        let (editor, folder) = try await editor(showing: "> quoted\n\nafter\n")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let storage = try #require(textView.textStorage)
+
+        try await moveCursor(to: (textView.string as NSString).length, in: textView)
+
+        #expect(isHidden(at: 0, in: textView))
+        #expect(storage.attribute(EditorTheme.quoteLineKey, at: 3, effectiveRange: nil) != nil)
+    }
 }
 

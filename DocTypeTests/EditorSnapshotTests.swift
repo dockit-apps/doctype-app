@@ -30,7 +30,10 @@ struct EditorSnapshotTests {
         print("Visiting \\(start)")
         ```
 
-        > Remember: BFS finds shortest paths in unweighted graphs.
+        > Remember: BFS finds shortest paths
+        > in unweighted graphs.
+
+        ---
 
         ```python
         def bfs(graph, start):
@@ -41,8 +44,17 @@ struct EditorSnapshotTests {
         One more paragraph after the code.
         """
 
-    @Test(arguments: ["light", "dark"])
-    func renderSampleNote(appearance: String) async throws {
+    /// Where the cursor is when rendering: it decides which markdown syntax shows.
+    static let cursors: [String: String] = [
+        "end": "after the code.",       // nothing revealed
+        "heading": "Lecture 4",          // the heading's "#" shows
+        "code": "let start",             // the Swift block's fences show
+    ]
+
+    @Test(arguments: ["light-end", "dark-end", "light-heading", "light-code"])
+    func renderSampleNote(variant: String) async throws {
+        let parts = variant.split(separator: "-").map(String.init)
+        let (appearance, cursor) = (parts[0], parts[1])
         let folder = FileManager.default.temporaryDirectory.appending(path: "DocTypeSnapshot-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -52,11 +64,12 @@ struct EditorSnapshotTests {
         editor.library = Library(root: folder)
         #expect(await editor.open("Sample.md"))
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 760),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 860),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         window.contentView = editor.scrollView
-        editor.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let anchor = (editor.textView.string as NSString).range(of: Self.cursors[cursor]!)
+        editor.textView.setSelectedRange(NSRange(location: anchor.upperBound, length: 0))
         if let layout = editor.textView.textLayoutManager {
             layout.ensureLayout(for: layout.documentRange)
         }
@@ -66,7 +79,6 @@ struct EditorSnapshotTests {
         let image = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: image)
         let png = try #require(image.representation(using: .png, properties: [:]))
-        let output = URL(fileURLWithPath: snapshotDirectory!).appending(path: "editor-\(appearance).png")
-        try png.write(to: output)
+        try png.write(to: URL(fileURLWithPath: snapshotDirectory!).appending(path: "editor-\(variant).png"))
     }
 }
