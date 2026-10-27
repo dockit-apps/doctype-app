@@ -26,6 +26,11 @@ public struct LibraryIndex: Sendable {
         notes[note.path] = note
     }
 
+    /// Removes a note's summary (e.g. the file was deleted outside the app).
+    mutating func remove(_ path: String) {
+        notes[path] = nil
+    }
+
     /// Notes matching `filter`, most recently modified first.
     public func notes(matching filter: Filter) -> [NoteSummary] {
         notes.values
