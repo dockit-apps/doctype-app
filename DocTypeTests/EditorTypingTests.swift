@@ -59,4 +59,23 @@ struct EditorTypingTests {
         let bodyLocation = (textView.string as NSString).range(of: "Body").location
         #expect(font(at: bodyLocation, in: textView)?.isFixedPitch == true)  // everything after the fence is code
     }
+
+    @Test func typingInsideACodeBlockKeepsCursorHighlightingAndBox() async throws {
+        let (editor, folder) = try await editor(showing: "Intro\n\n```swift\nlet a = 1\n```\n\nAfter.\n")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let storage = try #require(textView.textStorage)
+        let lineEnd = (textView.string as NSString).range(of: "let a = 1").upperBound
+        textView.setSelectedRange(NSRange(location: lineEnd, length: 0))
+
+        type("\nvar b = 2", in: textView)
+
+        #expect(textView.selectedRange() == NSRange(location: lineEnd + 10, length: 0))
+        let varLocation = (textView.string as NSString).range(of: "var").location
+        let keywordColor = storage.attribute(.foregroundColor, at: varLocation, effectiveRange: nil) as? NSColor
+        #expect(keywordColor != nil && keywordColor != NSColor.textColor)  // highlighted as a keyword
+        #expect(storage.attribute(EditorTheme.codeBlockLineKey, at: varLocation, effectiveRange: nil) != nil)  // inside the box
+        #expect(font(at: varLocation, in: textView)?.isFixedPitch == true)
+    }
 }
+

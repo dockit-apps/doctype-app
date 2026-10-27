@@ -24,6 +24,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
     @ObservationIgnored private let styler = StyleApplier()
+    @ObservationIgnored private let codeBlockLayout = CodeBlockLayout()
     @ObservationIgnored private(set) var path: String?
     @ObservationIgnored private var frontmatter: Frontmatter?
     /// The note's full text as we last loaded it from or saved it to disk.
@@ -41,6 +42,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.delegate = self
         styler.textView = textView
         textView.textStorage?.delegate = styler
+        textView.textLayoutManager?.delegate = codeBlockLayout
         textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
     }
 

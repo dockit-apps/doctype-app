@@ -23,10 +23,8 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
 
     /// Replaces the whole text with an already-styled document (opening a note).
     func replaceDocument(in storage: NSTextStorage, text: String, blockMap: BlockMap, spans: [StyleSpan]) {
-        let attributed = NSMutableAttributedString(string: text, attributes: EditorTheme.baseAttributes)
-        for span in spans {
-            attributed.addAttributes(EditorTheme.attributes(for: span.style), range: span.range)
-        }
+        let attributed = NSMutableAttributedString(string: text)
+        EditorTheme.apply(spans, to: attributed, resetting: NSRange(location: 0, length: attributed.length))
         isReplacingDocument = true
         storage.setAttributedString(attributed)
         isReplacingDocument = false
@@ -73,10 +71,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
 
     private func apply(_ range: NSRange, in storage: NSTextStorage) {
         let spans = MarkdownStyler.spans(in: storage.mutableString, blocks: blockMap.blocks(in: range))
-        storage.setAttributes(EditorTheme.baseAttributes, range: range)
-        for span in spans {
-            storage.addAttributes(EditorTheme.attributes(for: span.style), range: span.range)
-        }
+        EditorTheme.apply(spans, to: storage, resetting: range)
     }
 
     /// Moves a range recorded before an edit into post-edit coordinates.
