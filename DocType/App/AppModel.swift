@@ -13,6 +13,8 @@ final class AppModel {
         didSet { refreshVisibleNotes() }
     }
     private(set) var isScanning = false
+    /// The library folder was moved or deleted while open.
+    private(set) var isLibraryMissing = false
     var errorMessage: String?
 
     var sidebarSelection: LibraryIndex.Filter? = .all {
@@ -26,6 +28,7 @@ final class AppModel {
     @ObservationIgnored let editor = EditorController()
     @ObservationIgnored private var library: Library?
     @ObservationIgnored private var updatesTask: Task<Void, Never>?
+    @ObservationIgnored private var changesTask: Task<Void, Never>?
     @ObservationIgnored private var hasOpenedANote = false
 
     private static let lastOpenNoteKey = "lastOpenNote"
@@ -69,11 +72,27 @@ final class AppModel {
         await editor.save()
     }
 
+    /// Reacts to changes other programs made in the library folder.
+    private func handle(_ change: Library.Change) async {
+        switch change {
+        case .libraryMissing:
+            isLibraryMissing = true
+        case .notesChanged(let paths):
+            // An empty set means a full rescan: the open note may have changed too.
+            guard let openPath = editor.path, paths.isEmpty || paths.contains(openPath) else { return }
+            await editor.noteChangedOnDisk()
+            if editor.path == nil, selectedNotePath == openPath {
+                selectedNotePath = nil  // the note was deleted or moved away
+            }
+        }
+    }
+
     private func open(_ url: URL, restoring notePath: String?) {
         let library = Library(root: url)
         self.library = library
         editor.library = library
         libraryURL = url
+        isLibraryMissing = false
         index = LibraryIndex()
         sidebarSelection = .all
         // The last note opens right away; it doesn't wait for the scan.
@@ -85,10 +104,18 @@ final class AppModel {
                 self?.index = snapshot
             }
         }
+        changesTask?.cancel()
+        changesTask = Task { [weak self] in
+            for await change in library.changes {
+                await self?.handle(change)
+            }
+        }
         Task {
             isScanning = true
             defer { isScanning = false }
             do {
+                // Watch first, so nothing that happens during the scan is missed.
+                await library.startWatching()
                 try await library.scan()
             } catch {
                 errorMessage = "Couldn't read the library: \(error.localizedDescription)"

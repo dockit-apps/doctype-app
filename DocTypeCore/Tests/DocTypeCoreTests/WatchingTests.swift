@@ -106,6 +106,29 @@ struct WatchingTests {
         #expect(try await nextChange(of: library, timeout: .seconds(1)) == nil)
     }
 
+    @Test func gitCheckoutOf200FilesLeavesIndexMatchingAFreshScan() async throws {
+        let folder = try TemporaryLibrary()
+        for number in 1...300 { try folder.write("Notebook \(number % 7)/Note \(number).md", "original \(number)") }
+        let git = "git -c user.name=t -c user.email=t@t"
+        try externally(
+            "git init -q && \(git) add -A && \(git) commit -qm base && "
+                + "ls */*.md | head -200 | while read -r f; do printf 'changed' > \"$f\"; done && "
+                + "\(git) commit -qam change",
+            in: folder.root
+        )
+        let library = try await watchedLibrary(folder)
+
+        try externally("git checkout -q HEAD~1", in: folder.root)
+
+        let settled = try await waitForIndex(of: library, timeout: .seconds(5)) { index in
+            index.notes.count == 300 && index.notes.values.allSatisfy { $0.snippet.hasPrefix("original") }
+        }
+        let fresh = Library(root: folder.root)
+        try await fresh.scan()
+        #expect(settled)
+        #expect(await library.index.notes.mapValues(\.snippet) == fresh.index.notes.mapValues(\.snippet))
+    }
+
     @Test func deletingTheLibraryFolderIsReported() async throws {
         let folder = try TemporaryLibrary()
         let library = try await watchedLibrary(folder)

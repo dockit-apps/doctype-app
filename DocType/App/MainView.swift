@@ -39,8 +39,28 @@ struct MainView: View {
                 Button("Choose Library…") { isChoosingLibrary = true }
                     .buttonStyle(.glassProminent)
             }
+        } else if model.isLibraryMissing {
+            ContentUnavailableView {
+                Label("Library Not Found", systemImage: "folder.badge.questionmark")
+            } description: {
+                Text("The library folder was moved or deleted.")
+            } actions: {
+                Button("Choose Library…") { isChoosingLibrary = true }
+                    .buttonStyle(.glassProminent)
+            }
         } else if let path = model.selectedNotePath {
             EditorView(controller: model.editor)
+                .overlay(alignment: .bottom) {
+                    if model.editor.pendingDiskText != nil {
+                        ConflictBanner(
+                            onKeepMine: { Task { await model.editor.resolveConflict(.keepMine) } },
+                            onUseDiskVersion: { Task { await model.editor.resolveConflict(.useDiskVersion) } }
+                        )
+                        .padding(.bottom, 16)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy(duration: 0.2), value: model.editor.pendingDiskText != nil)
                 .navigationTitle(((path as NSString).lastPathComponent as NSString).deletingPathExtension)
                 .task(id: path) { await model.openSelectedNote() }
         } else {
