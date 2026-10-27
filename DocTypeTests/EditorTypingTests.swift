@@ -305,5 +305,60 @@ struct EditorTypingTests {
         try await Task.sleep(for: .milliseconds(50))
         #expect(isHidden(at: 2, in: textView))
     }
-}
 
+    @Test func returnContinuesANumberedListAndASecondReturnEndsIt() async throws {
+        let (editor, folder) = try await editor(showing: "1. one")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        type("two", in: textView)
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        #expect(textView.string == "1. one\n2. two\n3. ")
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        type("after", in: textView)
+        #expect(textView.string == "1. one\n2. two\nafter")
+    }
+
+    @Test func returnOnATaskStartsAnUncheckedTask() async throws {
+        let (editor, folder) = try await editor(showing: "- [x] done")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 10, length: 0))
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+
+        #expect(textView.string == "- [x] done\n- [ ] ")
+        #expect(textView.selectedRange() == NSRange(location: 17, length: 0))
+        #expect(textView.textStorage?.attribute(EditorTheme.taskKey, at: 13, effectiveRange: nil) as? Bool == false)
+    }
+
+    @Test func clickingACheckboxTogglesItAndUndoRevertsIt() async throws {
+        let (editor, folder) = try await editor(showing: "- [ ] task\n\nafter")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        textView.setSelectedRange(NSRange(location: 17, length: 0))  // cursor on "after"
+        try await Task.sleep(for: .milliseconds(50))
+        if let layout = textView.textLayoutManager { layout.ensureLayout(for: layout.documentRange) }
+
+        let boxRect = textView.convert(window.convertFromScreen(
+            textView.firstRect(forCharacterRange: NSRange(location: 2, length: 3), actualRange: nil)), from: nil)
+        let wordRect = textView.convert(window.convertFromScreen(
+            textView.firstRect(forCharacterRange: NSRange(location: 7, length: 3), actualRange: nil)), from: nil)
+        #expect(textView.taskBoxLocation(at: NSPoint(x: boxRect.midX, y: boxRect.midY)) == 2)
+        #expect(textView.taskBoxLocation(at: NSPoint(x: wordRect.midX, y: wordRect.midY)) == nil)  // the task's text
+
+        editor.toggleTask(at: 2)
+        #expect(textView.string == "- [x] task\n\nafter")
+        #expect(textView.selectedRange() == NSRange(location: 17, length: 0))  // the cursor didn't move
+        #expect(textView.textStorage?.attribute(EditorTheme.taskKey, at: 2, effectiveRange: nil) as? Bool == true)
+
+        textView.undoManager?.undo()
+        #expect(textView.string == "- [ ] task\n\nafter")
+    }
+}

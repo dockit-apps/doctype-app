@@ -44,6 +44,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.textStorage?.delegate = styler
         textView.textLayoutManager?.delegate = blockDecorations
         textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
+        textView.onTaskBoxClick = { [weak self] in self?.toggleTask(at: $0) }
     }
 
     func focusText() {

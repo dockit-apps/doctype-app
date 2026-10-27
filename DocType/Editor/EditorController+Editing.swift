@@ -1,5 +1,6 @@
-// Editing behaviors on top of plain typing: Return and Backspace in quotes, keeping
-// the cursor out of hidden syntax, and applying core TextEdits as one undo step.
+// Editing behaviors on top of plain typing: Return and Backspace in lists and
+// quotes, task box clicks, keeping the cursor out of hidden syntax, and applying
+// core TextEdits as one undo step.
 
 import AppKit
 import DocTypeCore
@@ -20,9 +21,11 @@ extension EditorController {
         let selection = textView.selectedRange()
         let edit: TextEdit? = switch selector {
         case #selector(NSResponder.insertNewline(_:)):
-            QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+            ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+                ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.deleteBackward(_:)):
-            QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+            ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+                ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
         default:
             nil
         }
@@ -31,13 +34,22 @@ extension EditorController {
         return true
     }
 
-    /// Keeps the cursor out of the hidden "> " of quote lines.
+    /// Checks or unchecks the task whose box starts at `boxLocation` (one undo step).
+    func toggleTask(at boxLocation: Int) {
+        guard let text = textView.textStorage?.mutableString,
+              let edit = TaskToggle.edit(togglingBoxAt: boxLocation, in: text, selection: textView.selectedRange())
+        else { return }
+        apply(edit)
+    }
+
+    /// Keeps the cursor out of the hidden "> " of quote lines and "- [ ] " of tasks.
     func textView(
         _ textView: NSTextView, willChangeSelectionFromCharacterRange oldRange: NSRange,
         toCharacterRange newRange: NSRange
     ) -> NSRange {
         guard let text = textView.textStorage?.mutableString else { return newRange }
-        return QuoteEditing.adjustedSelection(from: oldRange, to: newRange, in: text, blockMap: styler.blockMap)
+        let outOfQuote = QuoteEditing.adjustedSelection(from: oldRange, to: newRange, in: text, blockMap: styler.blockMap)
+        return ListContinuation.adjustedSelection(from: oldRange, to: outOfQuote, in: text, blockMap: styler.blockMap)
     }
 
     /// Right after hidden syntax, NSTextView would copy its zero-size font into the

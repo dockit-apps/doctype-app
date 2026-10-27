@@ -1,11 +1,45 @@
 // The editor's text view: a plain-text NSTextView on TextKit 2, configured for markdown.
-// Reports focus changes; later phases add task-marker clicks here.
+// Reports focus changes and clicks on task checkboxes.
 
 import AppKit
 
 final class MarkdownTextView: NSTextView {
     /// Called with true/false when the editor gains or loses keyboard focus.
     var onFocusChange: (Bool) -> Void = { _ in }
+
+    /// Called with the location of a task's "[ ]" when its checkbox is clicked.
+    var onTaskBoxClick: (Int) -> Void = { _ in }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let box = taskBoxLocation(at: convert(event.locationInWindow, from: nil)) else {
+            super.mouseDown(with: event)
+            return
+        }
+        window?.makeFirstResponder(self)  // so ⌘Z right after the click undoes it
+        onTaskBoxClick(box)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        if taskBoxLocation(at: convert(event.locationInWindow, from: nil)) != nil { NSCursor.pointingHand.set() }
+    }
+
+    /// Where the "[ ]" of the checkbox under `point` (view coordinates) starts, if any.
+    func taskBoxLocation(at point: NSPoint) -> Int? {
+        guard let storage = textStorage, storage.length > 0, let window else { return nil }
+        let index = characterIndexForInsertion(at: point)
+        for candidate in [index - 1, index] where candidate >= 0 && candidate < storage.length {
+            var box = NSRange()
+            let line = (storage.string as NSString).lineRange(for: NSRange(location: candidate, length: 0))
+            guard storage.attribute(EditorTheme.taskKey, at: candidate, longestEffectiveRange: &box, in: line) != nil
+            else { continue }
+            // The checkbox is drawn over the "[ ]" characters; allow a little slack around it.
+            let screenRect = firstRect(forCharacterRange: box, actualRange: nil)
+            let rect = convert(window.convertFromScreen(screenRect), from: nil)
+            if rect.insetBy(dx: -3, dy: -2).contains(point) { return box.location }
+        }
+        return nil
+    }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
