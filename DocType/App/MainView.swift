@@ -1,20 +1,53 @@
-// The three-pane layout: sidebar → note list → editor.
+// The three-pane layout: sidebar → note list → editor, plus first-launch onboarding.
 
+import DocTypeCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MainView: View {
+    @Environment(AppModel.self) private var model
+    @State private var isChoosingLibrary = false
+
     var body: some View {
         NavigationSplitView {
-            List {
-                Label("All Notes", systemImage: "note.text")
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+            SidebarView()
+                .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } content: {
-            ContentUnavailableView("No Notes", systemImage: "note.text")
+            NoteListView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 300)
         } detail: {
-            ContentUnavailableView("No Note Selected", systemImage: "square.and.pencil")
+            detail
         }
         .frame(minWidth: 800, minHeight: 500)
+        .fileImporter(isPresented: $isChoosingLibrary, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { model.chooseLibrary(url) }
+        }
+        .alert("Something went wrong", isPresented: errorIsPresented) {
+            Button("OK") {}
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+    }
+
+    @ViewBuilder private var detail: some View {
+        if model.libraryURL == nil {
+            ContentUnavailableView {
+                Label("Choose a Library", systemImage: "folder")
+            } description: {
+                Text("DocType keeps your notes as Markdown files in a folder you choose.")
+            } actions: {
+                Button("Choose Library…") { isChoosingLibrary = true }
+                    .buttonStyle(.glassProminent)
+            }
+        } else if let note = model.selectedNote {
+            // Replaced by the editor in Phase 2.
+            ContentUnavailableView(note.title, systemImage: "doc.text", description: Text(note.path))
+        } else {
+            ContentUnavailableView("No Note Selected", systemImage: "square.and.pencil")
+        }
+    }
+
+    private var errorIsPresented: Binding<Bool> {
+        Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
     }
 }

@@ -99,24 +99,83 @@ enum Snippet {
     }
 
     /// Removes markdown syntax from one line.
+    /// Plain character scanning rather than Swift Regex: with Regex, scanning
+    /// the 1,000-note fixture took 600 ms instead of about 240 ms.
     static func plainText(_ line: String) -> String {
         var text = Substring(line)
         // Block prefixes can nest (`> - [ ] task`), so strip until nothing changes.
         while true {
-            let before = text
             text = text.drop { $0 == " " }
-            if text.hasPrefix(">") { text = text.dropFirst() }
-            else if let range = text.firstMatch(of: #/^#{1,6}\s+/#)?.range { text = text[range.upperBound...] }
-            else if let range = text.firstMatch(of: #/^([-*+]|\d+[.)])\s+/#)?.range { text = text[range.upperBound...] }
-            else if let range = text.firstMatch(of: #/^\[[ xX]\]\s+/#)?.range { text = text[range.upperBound...] }
-            if text == before { break }
+            if text.hasPrefix(">") { text = text.dropFirst(); continue }
+            if let rest = dropBlockMarker(text) { text = rest; continue }
+            break
         }
-        var result = String(text)
-        result.replace(#/!?\[([^\]]*)\]\([^)]*\)/#) { String($0.output.1) }
-        for marker in ["**", "__", "~~", "`"] {
-            result = result.replacingOccurrences(of: marker, with: "")
+        return stripInlineMarkers(text).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Drops one `# `, `- `, `* `, `+ `, `1. `, `1) ` or `[ ] ` prefix, if present.
+    private static func dropBlockMarker(_ text: Substring) -> Substring? {
+        func afterSpace(_ index: Substring.Index) -> Substring? {
+            guard index < text.endIndex, text[index] == " " || text[index] == "\t" else { return nil }
+            return text[text.index(after: index)...]
         }
-        result.replace(#/\*([^*\s][^*]*)\*/#) { String($0.output.1) }
-        return result.trimmingCharacters(in: .whitespaces)
+        guard let first = text.first else { return nil }
+        if first == "#" {
+            let hashes = text.prefix { $0 == "#" }
+            return hashes.count <= 6 ? afterSpace(hashes.endIndex) : nil
+        }
+        if first == "-" || first == "*" || first == "+" {
+            return afterSpace(text.index(after: text.startIndex))
+        }
+        if first.isNumber {
+            let digits = text.prefix { $0.isNumber }
+            guard digits.endIndex < text.endIndex, text[digits.endIndex] == "." || text[digits.endIndex] == ")" else { return nil }
+            return afterSpace(text.index(after: digits.endIndex))
+        }
+        if text.hasPrefix("[ ]") || text.hasPrefix("[x]") || text.hasPrefix("[X]") {
+            return afterSpace(text.index(text.startIndex, offsetBy: 3))
+        }
+        return nil
+    }
+
+    /// `[text](url)` → `text`; removes `` ` ``, `**`, `__`, `~~` and emphasis `*`.
+    /// A lone `*` between spaces (`5 * 3`) and single `_` (`snake_case`) are kept.
+    private static func stripInlineMarkers(_ text: Substring) -> String {
+        let characters = Array(text)
+        var result = ""
+        result.reserveCapacity(characters.count)
+        var i = 0
+        while i < characters.count {
+            let character = characters[i]
+            let next: Character? = i + 1 < characters.count ? characters[i + 1] : nil
+            let previous: Character? = i > 0 ? characters[i - 1] : nil
+
+            if character == "[" || (character == "!" && next == "["),
+               let link = linkText(in: characters, openingAt: character == "!" ? i + 1 : i) {
+                result += link.text
+                i = link.end
+                continue
+            }
+            if (character == "_" && next == "_") || (character == "~" && next == "~") {
+                i += 2
+                continue
+            }
+            let isLoneAsterisk = character == "*" && previous == " " && (next == " " || next == nil)
+            if character == "`" || (character == "*" && !isLoneAsterisk) {
+                i += 1
+                continue
+            }
+            result.append(character)
+            i += 1
+        }
+        return result
+    }
+
+    /// For `[text](url)` starting at `open`, returns `text` and the index after `)`.
+    private static func linkText(in characters: [Character], openingAt open: Int) -> (text: String, end: Int)? {
+        guard let close = characters[open...].firstIndex(of: "]"),
+              close + 1 < characters.count, characters[close + 1] == "(",
+              let end = characters[(close + 1)...].firstIndex(of: ")") else { return nil }
+        return (String(characters[(open + 1)..<close]), end + 1)
     }
 }

@@ -36,3 +36,14 @@ cd DocTypeCore && swift test
 - `docs/PLAN.md`: the MVP plan, phase by phase.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
+
+## Performance fixtures
+
+Generate a fake 1,000-note library (plus one 5,000-line note) and run the local performance checks against it:
+
+```bash
+swift Scripts/make-fixtures.swift ~/DocTypeFixtures
+cd DocTypeCore && DOCTYPE_FIXTURES=~/DocTypeFixtures swift test --filter PerformanceTests
+```
+
+To try the app with it, choose `~/DocTypeFixtures` as the library.

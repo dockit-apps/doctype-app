@@ -34,8 +34,13 @@ struct NoteSummaryTests {
         #expect(summary(text).snippet == "Bold and italic with code and gone link text item")
     }
 
-    @Test func snippetKeepsSnakeCase() {
+    @Test func snippetKeepsSnakeCaseBracketsAndArithmetic() {
         #expect(summary("call my_func_name now").snippet == "call my_func_name now")
+        #expect(summary("array[0] = 5 * 3").snippet == "array[0] = 5 * 3")
+    }
+
+    @Test func snippetReplacesImagesAndLinksWithTheirText() {
+        #expect(summary("See ![diagram](a.png) and [docs](https://x.y).").snippet == "See diagram and docs.")
     }
 
     @Test func snippetSkipsFencesAndRulesButKeepsCode() {
