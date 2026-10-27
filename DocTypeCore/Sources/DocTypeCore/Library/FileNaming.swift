@@ -1,4 +1,4 @@
-// Rules for naming note files: new notes, conflict copies; invalid names in Phase 5.
+// Rules for naming notes and notebooks: valid names, free names, conflict copies.
 
 import Foundation
 
@@ -25,14 +25,35 @@ public enum FileNaming {
     }
 
     /// `Untitled.md`, or `Untitled 2.md`, `Untitled 3.md`, … if taken, inside `folder`.
-    static func availableNotePath(title: String, in folder: String, exists: (String) -> Bool) -> String {
-        var name = "\(title).md"
+    /// With `extension: nil` it names folders the same way.
+    static func availablePath(name: String, extension: String?, in folder: String, exists: (String) -> Bool) -> String {
+        let suffix = `extension`.map { ".\($0)" } ?? ""
+        var candidate = "\(name)\(suffix)"
         var counter = 2
-        while exists(join(folder, name)) {
-            name = "\(title) \(counter).md"
+        while exists(join(folder, candidate)) {
+            candidate = "\(name) \(counter)\(suffix)"
             counter += 1
         }
-        return join(folder, name)
+        return join(folder, candidate)
+    }
+
+    /// Trims a user-typed note or notebook name and checks it can be a file name
+    /// that stays visible in Finder and works in git.
+    public static func validatedName(_ raw: String) throws -> String {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            throw LibraryError.invalidName("A name can't be empty.")
+        }
+        if name.contains("/") || name.contains(":") {
+            throw LibraryError.invalidName("Names can't contain “/” or “:”.")
+        }
+        if name.hasPrefix(".") {
+            throw LibraryError.invalidName("Names can't start with a dot; the file would be hidden.")
+        }
+        if name.utf8.count > 250 {
+            throw LibraryError.invalidName("That name is too long.")
+        }
+        return name
     }
 
     private static func join(_ folder: String, _ name: String) -> String {

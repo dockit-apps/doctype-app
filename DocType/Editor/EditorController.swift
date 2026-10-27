@@ -15,6 +15,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Set while the note changed on disk and the editor has unsaved edits.
     /// Holds the disk text; autosave is paused until it's resolved.
     private(set) var pendingDiskText: String?
+    /// Tags from the open note's frontmatter (shown in the tag row).
+    private(set) var tags: [String] = []
+    /// The text view has keyboard focus.
+    private(set) var hasFocus = false
 
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
@@ -24,6 +28,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored private var lastSyncedText = ""
     @ObservationIgnored private var isDirty = false
     @ObservationIgnored private var autosaveTask: Task<Void, Never>?
+    /// True while the open note's file is being renamed or moved.
+    @ObservationIgnored private var isMoving = false
     @ObservationIgnored var library: Library?
     @ObservationIgnored var onError: (String) -> Void = { _ in }
 
@@ -31,6 +37,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
         (scrollView, textView) = MarkdownTextView.makeScrollableEditor()
         super.init()
         textView.delegate = self
+        textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
+    }
+
+    func focusText() {
+        textView.window?.makeFirstResponder(textView)
     }
 
     /// The note's full text as it would be written now: frontmatter + editor body.
@@ -62,6 +73,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         await flush()
         path = nil
         frontmatter = nil
+        tags = []
         lastSyncedText = ""
         textView.string = ""
         textView.undoManager?.removeAllActions()
@@ -76,10 +88,31 @@ final class EditorController: NSObject, NSTextViewDelegate {
         await save()
     }
 
-    /// Writes the note if it has unsaved changes. Paused while a conflict is pending.
+    /// Runs a rename or move of the open note's file. Saves first, then holds
+    /// autosave until the move is done, so nothing gets written to the old path.
+    /// `move` returns the note's new path.
+    func whileMoving(_ move: () async throws -> String) async throws {
+        await flush()
+        isMoving = true
+        defer {
+            isMoving = false
+            if isDirty { scheduleAutosave() }
+        }
+        path = try await move()
+    }
+
+    /// Closes the note without saving, e.g. after it was moved to the Trash.
+    func discard() async {
+        isDirty = false
+        pendingDiskText = nil
+        await close()
+    }
+
+    /// Writes the note if it has unsaved changes. Paused while a conflict is
+    /// pending or the file is being moved.
     func save() async {
         autosaveTask?.cancel()
-        guard isDirty, pendingDiskText == nil, let path, let library else { return }
+        guard isDirty, pendingDiskText == nil, !isMoving, let path, let library else { return }
         let text = currentText
         isDirty = false
         lastSyncedText = text
@@ -162,6 +195,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         let scrollOrigin = scrollView.contentView.bounds.origin
 
         self.frontmatter = frontmatter
+        tags = frontmatter?.tags ?? []
         lastSyncedText = text
         isDirty = false
         autosaveTask?.cancel()
@@ -184,6 +218,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         isDirty = true
+        scheduleAutosave()
+    }
+
+    private func scheduleAutosave() {
         autosaveTask?.cancel()
         guard pendingDiskText == nil else { return }
         autosaveTask = Task { [weak self] in

@@ -20,6 +20,16 @@ final class CommandRunner {
             model.isChoosingLibrary = true
         case .newNote:
             Task { await model.createNote() }
+        case .newNotebook:
+            Task { await model.createNotebook() }
+        case .renameNote:
+            model.titleFocusRequest += 1
+        case .moveNote:
+            model.showMoveNotePicker()
+        case .trashNote:
+            Task { await model.trashSelectedNote() }
+        case .renameNotebook:
+            model.beginRenamingNotebook(model.selectedNotebook)
         case .toggleSidebar:
             model.toggleSidebar()
         }
@@ -29,8 +39,17 @@ final class CommandRunner {
         switch command {
         case .showCommandPalette, .chooseLibrary, .toggleSidebar:
             true
-        case .newNote:
+        case .newNote, .newNotebook:
             model.hasUsableLibrary
+        case .renameNote:
+            model.selectedNotePath != nil
+        case .moveNote:
+            model.hasUsableLibrary && model.selectedNotePath != nil
+        case .trashNote:
+            // In the editor, ⌘⌫ keeps its usual meaning: delete to the start of the line.
+            model.selectedNotePath != nil && !model.editor.hasFocus
+        case .renameNotebook:
+            !model.selectedNotebook.isEmpty
         }
     }
 

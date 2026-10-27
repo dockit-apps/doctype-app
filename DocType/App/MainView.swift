@@ -23,6 +23,11 @@ struct MainView: View {
         }
         .overlay(alignment: .top) { paletteOverlay }
         .animation(.snappy(duration: 0.15), value: model.palette != nil)
+        .alert("Rename Notebook", isPresented: notebookRenameIsPresented) {
+            TextField("Name", text: $model.notebookNameDraft)
+            Button("Rename") { Task { await model.commitNotebookRename() } }
+            Button("Cancel", role: .cancel) { model.notebookBeingRenamed = nil }
+        }
         .alert("Something went wrong", isPresented: errorIsPresented) {
             Button("OK") {}
         } message: {
@@ -50,7 +55,10 @@ struct MainView: View {
                     .buttonStyle(.glassProminent)
             }
         } else if let path = model.selectedNotePath {
-            EditorView(controller: model.editor)
+            VStack(spacing: 0) {
+                NoteHeaderView(path: path)
+                EditorView(controller: model.editor)
+            }
                 .overlay(alignment: .bottom) {
                     if model.editor.pendingDiskText != nil {
                         ConflictBanner(
@@ -84,6 +92,11 @@ struct MainView: View {
             }
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
         }
+    }
+
+    private var notebookRenameIsPresented: Binding<Bool> {
+        // The buttons clear the state themselves, so Rename still knows which notebook it was.
+        Binding(get: { model.notebookBeingRenamed != nil }, set: { _ in })
     }
 
     private var errorIsPresented: Binding<Bool> {

@@ -21,7 +21,7 @@ public actor Library {
     /// Publishes external changes once watching has started. One consumer per Library.
     public nonisolated let changes: AsyncStream<Change>
 
-    public private(set) var index = LibraryIndex()
+    public internal(set) var index = LibraryIndex()
     private let updatesContinuation: AsyncStream<LibraryIndex>.Continuation
     private let changesContinuation: AsyncStream<Change>.Continuation
     private var watcher: FolderWatcher?
@@ -72,16 +72,6 @@ public actor Library {
         updatesContinuation.yield(index)
     }
 
-    /// Creates an empty note in `folder` (`""` = library root), named `title`
-    /// or `title 2`, `title 3`, … if taken. Returns the new note's path.
-    public func createNote(in folder: String, title: String = "Untitled") throws -> String {
-        let path = FileNaming.availableNotePath(title: title, in: folder) { candidate in
-            FileManager.default.fileExists(atPath: url(for: candidate).path)
-        }
-        try save(path, text: "")
-        return path
-    }
-
     /// Saves `text` as a new note next to `path`, named like
     /// `Graphs (conflict 2026-10-27 135210).md`. Used so that resolving a conflict
     /// never throws text away. Falls back to the library root if the note's
@@ -97,6 +87,11 @@ public actor Library {
         }
         try save(copyPath, text: text)
         return copyPath
+    }
+
+    /// Sends the current index to the app.
+    func publishIndex() {
+        updatesContinuation.yield(index)
     }
 
     // MARK: - Watching for external changes
@@ -140,14 +135,14 @@ public actor Library {
             }
         } else if !changedNotes.isEmpty {
             changedNotes.forEach(refreshSummary)
-            updatesContinuation.yield(index)
+            publishIndex()
         }
         if needsRescan || !changedNotes.isEmpty {
             changesContinuation.yield(.notesChanged(changedNotes))
         }
     }
 
-    private func refreshSummary(for path: String) {
+    func refreshSummary(for path: String) {
         let fileURL = url(for: path)
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
         if let values = try? fileURL.resourceValues(forKeys: keys), values.isRegularFile == true {
@@ -167,7 +162,7 @@ public actor Library {
         return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
     }
 
-    private func url(for path: String) -> URL {
+    func url(for path: String) -> URL {
         root.appending(path: path, directoryHint: .notDirectory)
     }
 

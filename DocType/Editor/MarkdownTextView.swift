@@ -1,10 +1,25 @@
 // The editor's text view: a plain-text NSTextView on TextKit 2, configured for markdown.
-// Later phases add task-marker clicks and focus tracking here.
+// Reports focus changes; later phases add task-marker clicks here.
 
 import AppKit
 
 final class MarkdownTextView: NSTextView {
     static let bodyFont = NSFont.systemFont(ofSize: 15)
+
+    /// Called with true/false when the editor gains or loses keyboard focus.
+    var onFocusChange: (Bool) -> Void = { _ in }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFocusChange(false) }
+        return accepted
+    }
 
     /// Builds a TextKit 2 text view inside a scroll view, ready for the editor.
     static func makeScrollableEditor() -> (NSScrollView, MarkdownTextView) {

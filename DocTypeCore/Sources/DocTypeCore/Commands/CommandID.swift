@@ -8,6 +8,11 @@ public enum CommandID: String, CaseIterable, Sendable {
     case showCommandPalette = "app.commandPalette"
     case chooseLibrary = "library.choose"
     case newNote = "note.new"
+    case newNotebook = "notebook.new"
+    case renameNote = "note.rename"
+    case moveNote = "note.move"
+    case trashNote = "note.trash"
+    case renameNotebook = "notebook.rename"
     case toggleSidebar = "view.toggleSidebar"
 }
 
@@ -37,6 +42,16 @@ extension CommandID {
             Info(title: "Choose Library…", menu: .file, defaultShortcuts: [.command("o")])
         case .newNote:
             Info(title: "New Note", menu: .file, defaultShortcuts: [.command("n")])
+        case .newNotebook:
+            Info(title: "New Notebook", menu: .file, defaultShortcuts: [.command("n", .shift)])
+        case .renameNote:
+            Info(title: "Rename Note", menu: .note, defaultShortcuts: [.command("r", .shift)])
+        case .moveNote:
+            Info(title: "Move to Notebook…", menu: .note, defaultShortcuts: [.command("m", .shift)])
+        case .trashNote:
+            Info(title: "Move to Trash", menu: .note, defaultShortcuts: [Shortcut(.delete, .command)])
+        case .renameNotebook:
+            Info(title: "Rename Notebook…", menu: .file, defaultShortcuts: [])
         case .toggleSidebar:
             Info(title: "Toggle Sidebar", menu: .view, defaultShortcuts: [.command("s", [.control])])
         }

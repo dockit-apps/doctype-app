@@ -22,6 +22,11 @@ final class AppModel {
     var columnVisibility: NavigationSplitViewVisibility = .all
     /// The palette currently shown, if any.
     private(set) var palette: Palette?
+    /// Incremented to ask the note header to focus the title field.
+    var titleFocusRequest = 0
+    /// The notebook being renamed (path) and the name typed so far.
+    var notebookBeingRenamed: String?
+    var notebookNameDraft = ""
 
     var sidebarSelection: LibraryIndex.Filter? = .all {
         didSet { refreshVisibleNotes() }
@@ -35,8 +40,8 @@ final class AppModel {
     @ObservationIgnored private(set) lazy var commands = CommandRunner(model: self)
     /// Where keyboard focus was before the palette opened, to put it back after.
     @ObservationIgnored private weak var focusBeforePalette: NSResponder?
-    @ObservationIgnored private var focusEditorOnNextOpen = false
-    @ObservationIgnored private var library: Library?
+    @ObservationIgnored var focusTitleOnNextOpen = false
+    @ObservationIgnored private(set) var library: Library?
     @ObservationIgnored private var updatesTask: Task<Void, Never>?
     @ObservationIgnored private var changesTask: Task<Void, Never>?
     @ObservationIgnored private var hasOpenedANote = false
@@ -94,13 +99,13 @@ final class AppModel {
         columnVisibility = columnVisibility == .all ? .doubleColumn : .all
     }
 
-    /// Creates `Untitled.md` in the selected notebook (or the library root) and opens it.
+    /// Creates `Untitled.md` in the selected notebook (or the library root), opens it
+    /// and puts the cursor in the title field.
     func createNote() async {
         guard let library else { return }
-        let folder = if case .notebook(let path) = sidebarSelection { path } else { "" }
         do {
-            let path = try await library.createNote(in: folder)
-            focusEditorOnNextOpen = true
+            let path = try await library.createNote(in: selectedNotebook)
+            focusTitleOnNextOpen = true
             selectedNotePath = path
         } catch {
             errorMessage = "Couldn't create a note: \(error.localizedDescription)"
@@ -123,11 +128,12 @@ final class AppModel {
     func openSelectedNote() async {
         guard let path = selectedNotePath else { return }
         let isLaunchRestore = !hasOpenedANote
-        let focus = isLaunchRestore || focusEditorOnNextOpen
-        focusEditorOnNextOpen = false
-        if await editor.open(path, focus: focus) {
+        let focusTitle = focusTitleOnNextOpen
+        focusTitleOnNextOpen = false
+        if await editor.open(path, focus: isLaunchRestore && !focusTitle) {
             hasOpenedANote = true
             UserDefaults.standard.set(path, forKey: Self.lastOpenNoteKey)
+            if focusTitle { titleFocusRequest += 1 }
             if isLaunchRestore { LaunchTimer.logEditable() }
         } else if !Task.isCancelled, selectedNotePath == path {
             selectedNotePath = nil  // the note no longer exists
