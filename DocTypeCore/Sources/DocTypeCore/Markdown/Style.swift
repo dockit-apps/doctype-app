@@ -9,9 +9,20 @@ public enum Style: Hashable, Sendable {
     case heading(level: Int)
     /// Markdown syntax that stays visible but dimmed: `#`, `>`, fences, `**`, …
     case syntaxMarker
-    /// The lines of a code block (monospace with a subtle background).
+    /// The lines of a code block (monospace, drawn as a box).
     case codeBlock
+    /// A syntax-highlighted token inside a fenced code block.
+    case code(CodeToken)
     case blockquote
+}
+
+/// Kinds of code tokens the editor colors.
+public enum CodeToken: Hashable, Sendable {
+    case keyword
+    case string
+    case comment
+    case number
+    case type
 }
 
 public struct StyleSpan: Equatable, Sendable {

@@ -33,9 +33,10 @@ struct MarkdownStylerTests {
         expectSpans("Title\n=====\n", [("Title\n=====", .heading(level: 1)), ("=====", .syntaxMarker)])
     }
 
-    @Test func fencedCodeIsMonospaceWithDimmedFences() {
+    @Test func fencedCodeIsMonospaceHighlightedWithDimmedFences() {
         expectSpans("```swift\nlet a = 1\n```\n\n", [
-            ("```swift\nlet a = 1\n```", .codeBlock), ("```swift", .syntaxMarker), ("```", .syntaxMarker),
+            ("```swift\nlet a = 1\n```", .codeBlock), ("let", .code(.keyword)), ("1", .code(.number)),
+            ("```swift", .syntaxMarker), ("```", .syntaxMarker),
         ])
     }
 

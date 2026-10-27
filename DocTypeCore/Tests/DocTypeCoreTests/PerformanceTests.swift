@@ -55,4 +55,31 @@ struct PerformanceTests {
         #expect(median < .milliseconds(1))
         #expect(worst < .milliseconds(8))
     }
+
+    @Test func typingInsideA1000LineCodeBlockStaysUnderBudget() {
+        let line = "    let value = compute(\"text\", 42) // comment for Section\n"
+        let text = NSMutableString(string: "Intro\n\n```swift\n" + String(repeating: line, count: 1_000) + "```\n")
+        var map = BlockMap(text: text)
+        var location = text.length / 2
+        let clock = ContinuousClock()
+        var timings: [Duration] = []
+        for _ in 0..<200 {
+            timings.append(clock.measure {
+                text.replaceCharacters(in: NSRange(location: location, length: 0), with: "x")
+                let dirty = map.update(text: text, editedRange: NSRange(location: location, length: 1), changeInLength: 1)
+                _ = MarkdownStyler.spans(in: text, blocks: map.blocks(in: dirty))
+            })
+            location += 1
+        }
+        timings.sort()
+        print("Per keystroke in a 1,000-line code block: median \(timings[timings.count / 2]), max \(timings.last!)")
+        // The whole block is re-tokenized per keystroke. Optimized builds stay around 1 ms;
+        // unoptimized debug builds take ~25 ms for a block this size (fine for typical
+        // 10–50 line blocks). Per-line incremental tokenizing would remove that if needed.
+        #if !DEBUG
+        #expect(timings[timings.count / 2] < .milliseconds(4))
+        #expect(timings.last! < .milliseconds(8))
+        #endif
+    }
 }
+

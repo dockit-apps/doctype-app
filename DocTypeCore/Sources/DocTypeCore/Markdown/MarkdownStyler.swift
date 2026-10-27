@@ -33,7 +33,8 @@ public enum MarkdownStyler {
 
     // MARK: - Code blocks
 
-    /// Monospace for the fence lines and everything between; fences dimmed.
+    /// Monospace for the fence lines and everything between, code tokens colored
+    /// by language, fences dimmed.
     /// Trailing blank lines after the closing fence stay unstyled.
     private static func codeBlockSpans(_ block: Block, in text: NSString) -> [StyleSpan] {
         let opening = Line(text, at: block.range.location)
@@ -53,6 +54,10 @@ public enum MarkdownStyler {
         }
         if closing == nil { codeEnd = max(codeEnd, block.range.upperBound) }
         spans.append(StyleSpan(NSRange(location: block.range.location, length: codeEnd - block.range.location), .codeBlock))
+        let codeStart = opening.end
+        let codeStop = max(codeStart, closing?.start ?? codeEnd)
+        spans += CodeHighlighter.spans(in: text, range: NSRange(location: codeStart, length: codeStop - codeStart),
+                                       language: fence.info)
         spans.append(StyleSpan(NSRange(location: opening.start, length: opening.content.length), .syntaxMarker))
         if let closing {
             spans.append(StyleSpan(NSRange(location: closing.start, length: closing.content.length), .syntaxMarker))
