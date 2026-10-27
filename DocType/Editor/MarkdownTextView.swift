@@ -4,8 +4,6 @@
 import AppKit
 
 final class MarkdownTextView: NSTextView {
-    static let bodyFont = NSFont.systemFont(ofSize: 15)
-
     /// Called with true/false when the editor gains or loses keyboard focus.
     var onFocusChange: (Bool) -> Void = { _ in }
 
@@ -48,9 +46,9 @@ final class MarkdownTextView: NSTextView {
         isAutomaticSpellingCorrectionEnabled = false
         isContinuousSpellCheckingEnabled = true
 
-        font = Self.bodyFont
+        font = EditorTheme.bodyFont
         textColor = .textColor
-        typingAttributes = [.font: Self.bodyFont, .foregroundColor: NSColor.textColor]
+        typingAttributes = EditorTheme.baseAttributes
         drawsBackground = true
         backgroundColor = .textBackgroundColor
         textContainerInset = NSSize(width: 24, height: 20)

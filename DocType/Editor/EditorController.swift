@@ -7,6 +7,7 @@
 import AppKit
 import DocTypeCore
 import Observation
+import os
 
 @Observable
 final class EditorController: NSObject, NSTextViewDelegate {
@@ -22,6 +23,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
+    @ObservationIgnored private let styler = StyleApplier()
     @ObservationIgnored private(set) var path: String?
     @ObservationIgnored private var frontmatter: Frontmatter?
     /// The note's full text as we last loaded it from or saved it to disk.
@@ -37,6 +39,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
         (scrollView, textView) = MarkdownTextView.makeScrollableEditor()
         super.init()
         textView.delegate = self
+        styler.textView = textView
+        textView.textStorage?.delegate = styler
         textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
     }
 
@@ -57,10 +61,12 @@ final class EditorController: NSObject, NSTextViewDelegate {
         await flush()
         guard let library else { return false }
         do {
-            let text = try await library.read(path)
+            let state = DocTypeCore.signposter.beginInterval("Open note")
+            defer { DocTypeCore.signposter.endInterval("Open note", state) }
+            let note = await prepare(try await library.read(path))
             guard !Task.isCancelled else { return false }
             self.path = path
-            load(text, keepingPosition: false)
+            show(note, keepingPosition: false)
             if focus { textView.window?.makeFirstResponder(textView) }
             return true
         } catch {
@@ -75,7 +81,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
         frontmatter = nil
         tags = []
         lastSyncedText = ""
-        textView.string = ""
+        isDirty = false
+        if let storage = textView.textStorage {
+            styler.replaceDocument(in: storage, text: "", blockMap: BlockMap(), spans: [])
+        }
         textView.undoManager?.removeAllActions()
     }
 
@@ -141,7 +150,15 @@ final class EditorController: NSObject, NSTextViewDelegate {
         case .ignore:
             break
         case .reload:
-            load(diskText, keepingPosition: true)
+            let note = await prepare(diskText)
+            guard path == self.path else { return }
+            if isDirty {
+                // You started typing while the new version was being prepared.
+                autosaveTask?.cancel()
+                pendingDiskText = diskText
+            } else {
+                show(note, keepingPosition: true)
+            }
         case .showConflict:
             autosaveTask?.cancel()
             pendingDiskText = diskText
@@ -167,6 +184,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Applies the banner choice: first the conflict copy, then the final text.
     func resolveConflict(_ choice: ExternalChangePolicy.Choice) async {
         guard let diskText = pendingDiskText, let path, let library else { return }
+        // Read-only while resolving, so nothing typed during the saves can be lost.
+        textView.isEditable = false
+        defer { textView.isEditable = true }
         let resolution = ExternalChangePolicy.resolve(choice, editorText: currentText, diskText: diskText)
         do {
             try await library.saveConflictCopy(of: path, text: resolution.copyText)
@@ -181,25 +201,44 @@ final class EditorController: NSObject, NSTextViewDelegate {
             isDirty = true
             await save()
         case .useDiskVersion:
-            load(resolution.finalText, keepingPosition: true)
+            show(await prepare(resolution.finalText), keepingPosition: true)
         }
     }
 
     // MARK: - Showing text
 
-    /// Puts a note's text into the editor without registering undo.
-    /// When reloading the same note, the caret and scroll position stay put.
-    private func load(_ text: String, keepingPosition: Bool) {
+    /// A note's text split and styled, ready to put on screen.
+    private struct PreparedNote {
+        let text: String
+        let frontmatter: Frontmatter?
+        let body: String
+        let blockMap: BlockMap
+        let spans: [StyleSpan]
+    }
+
+    /// Splits off the frontmatter and styles the body off the main thread.
+    private func prepare(_ text: String) async -> PreparedNote {
         let (frontmatter, body) = Frontmatter.split(text)
+        let bodyText = String(body)
+        let styled = await MarkdownStyler.styleDocument(bodyText)
+        return PreparedNote(text: text, frontmatter: frontmatter, body: bodyText,
+                            blockMap: styled.blockMap, spans: styled.spans)
+    }
+
+    /// Puts a prepared note into the editor without registering undo.
+    /// When reloading the same note, the caret and scroll position stay put.
+    private func show(_ note: PreparedNote, keepingPosition: Bool) {
         let selection = textView.selectedRange()
         let scrollOrigin = scrollView.contentView.bounds.origin
 
-        self.frontmatter = frontmatter
-        tags = frontmatter?.tags ?? []
-        lastSyncedText = text
+        frontmatter = note.frontmatter
+        tags = note.frontmatter?.tags ?? []
+        lastSyncedText = note.text
         isDirty = false
         autosaveTask?.cancel()
-        textView.string = String(body)
+        if let storage = textView.textStorage {
+            styler.replaceDocument(in: storage, text: note.body, blockMap: note.blockMap, spans: note.spans)
+        }
         // Clearing makes ⌘Z never reach text from another note or version.
         textView.undoManager?.removeAllActions()
 
@@ -218,6 +257,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         isDirty = true
+        if let storage = textView.textStorage { styler.restylePending(in: storage) }
         scheduleAutosave()
     }
 
