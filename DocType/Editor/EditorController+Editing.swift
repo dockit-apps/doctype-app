@@ -1,4 +1,4 @@
-// Editing behaviors on top of plain typing: Return and Backspace in lists and
+// Editing behaviors on top of plain typing: Return, Backspace and Tab in lists and
 // quotes, task box clicks, keeping the cursor out of hidden syntax, and applying
 // core TextEdits as one undo step.
 
@@ -9,6 +9,7 @@ extension EditorController {
     /// Applies an edit computed by core through NSTextView's undo-aware path, so
     /// one ⌘Z reverts it and styling and autosave follow as for typing.
     func apply(_ edit: TextEdit) {
+        guard !edit.isNoChange else { return }
         guard let storage = textView.textStorage,
               textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
         storage.replaceCharacters(in: edit.range, with: edit.replacement)
@@ -26,6 +27,10 @@ extension EditorController {
         case #selector(NSResponder.deleteBackward(_:)):
             ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+        case #selector(NSResponder.insertTab(_:)):
+            ListIndentation.edit(.indent, in: text, selection: selection, blockMap: styler.blockMap)
+        case #selector(NSResponder.insertBacktab(_:)):
+            ListIndentation.edit(.outdent, in: text, selection: selection, blockMap: styler.blockMap)
         default:
             nil
         }

@@ -361,4 +361,58 @@ struct EditorTypingTests {
         textView.undoManager?.undo()
         #expect(textView.string == "- [ ] task\n\nafter")
     }
+
+    @Test func returnThenTabStartsANumberedSubListAtOne() async throws {
+        let (editor, folder) = try await editor(showing: "1. one\n2. two")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        press(#selector(NSResponder.insertTab(_:)), in: textView)
+        type("sub", in: textView)
+
+        #expect(textView.string == "1. one\n   1. sub\n2. two")
+    }
+
+    @Test func shiftTabMovesAnItemOutInOneUndoStep() async throws {
+        let (editor, folder) = try await editor(showing: "1. one\n   1. sub\n2. two")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView  // the undo manager comes from the window
+        textView.setSelectedRange(NSRange(location: 16, length: 0))  // after "sub"
+
+        press(#selector(NSResponder.insertBacktab(_:)), in: textView)
+        #expect(textView.string == "1. one\n2. sub\n3. two")
+        #expect(textView.selectedRange() == NSRange(location: 13, length: 0))  // still after "sub"
+
+        textView.undoManager?.undo()
+        #expect(textView.string == "1. one\n   1. sub\n2. two")
+    }
+
+    @Test func tabOnATaskKeepsItACheckbox() async throws {
+        let (editor, folder) = try await editor(showing: "- [ ] a\n- [ ] b")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 14, length: 0))
+
+        press(#selector(NSResponder.insertTab(_:)), in: textView)
+
+        #expect(textView.string == "- [ ] a\n  - [ ] b")
+        #expect(textView.selectedRange() == NSRange(location: 16, length: 0))
+        #expect(textView.textStorage?.attribute(EditorTheme.taskKey, at: 12, effectiveRange: nil) as? Bool == false)
+    }
+
+    @Test func tabOutsideAListStillTypesATab() async throws {
+        let (editor, folder) = try await editor(showing: "text")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 4, length: 0))
+
+        press(#selector(NSResponder.insertTab(_:)), in: textView)
+
+        #expect(textView.string == "text\t")
+    }
 }
