@@ -10,14 +10,30 @@
 		D0C0000000000000000000B1 /* DocTypeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D0C0000000000000000000D1 /* DocTypeCore */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		D0C0000000000000000000A7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D0C00000000000000000009A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D0C00000000000000000008B;
+			remoteInfo = DocType;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		D0C0000000000000000000A1 /* DocType.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DocType.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0C0000000000000000000A2 /* DocTypeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DocTypeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D0C00000000000000000008A /* DocType */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = DocType;
+			sourceTree = "<group>";
+		};
+		D0C00000000000000000008C /* DocTypeTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DocTypeTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -31,6 +47,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0C0000000000000000000F2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -38,6 +61,7 @@
 			isa = PBXGroup;
 			children = (
 				D0C00000000000000000008A /* DocType */,
+				D0C00000000000000000008C /* DocTypeTests */,
 				D0C0000000000000000000E2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				D0C0000000000000000000A1 /* DocType.app */,
+				D0C0000000000000000000A2 /* DocTypeTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -76,6 +101,27 @@
 			productReference = D0C0000000000000000000A1 /* DocType.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D0C00000000000000000008D /* DocTypeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0C0000000000000000000A3 /* Build configuration list for PBXNativeTarget "DocTypeTests" */;
+			buildPhases = (
+				D0C0000000000000000000A4 /* Sources */,
+				D0C0000000000000000000F2 /* Frameworks */,
+				D0C0000000000000000000A5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D0C0000000000000000000A6 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D0C00000000000000000008C /* DocTypeTests */,
+			);
+			name = DocTypeTests;
+			productName = DocTypeTests;
+			productReference = D0C0000000000000000000A2 /* DocTypeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -88,6 +134,10 @@
 				TargetAttributes = {
 					D0C00000000000000000008B = {
 						CreatedOnToolsVersion = 27.0;
+					};
+					D0C00000000000000000008D = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D0C00000000000000000008B;
 					};
 				};
 			};
@@ -109,12 +159,20 @@
 			projectRoot = "";
 			targets = (
 				D0C00000000000000000008B /* DocType */,
+				D0C00000000000000000008D /* DocTypeTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		D0C00000000000000000009F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0C0000000000000000000A5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -131,7 +189,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0C0000000000000000000A4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D0C0000000000000000000A6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D0C00000000000000000008B /* DocType */;
+			targetProxy = D0C0000000000000000000A7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		D0C0000000000000000000C1 /* Debug */ = {
@@ -252,6 +325,48 @@
 			};
 			name = Release;
 		};
+		D0C0000000000000000000C5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.dockit-apps.doctype.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DocType.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DocType";
+			};
+			name = Debug;
+		};
+		D0C0000000000000000000C6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.dockit-apps.doctype.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DocType.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DocType";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -269,6 +384,15 @@
 			buildConfigurations = (
 				D0C0000000000000000000C3 /* Debug */,
 				D0C0000000000000000000C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0C0000000000000000000A3 /* Build configuration list for PBXNativeTarget "DocTypeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0C0000000000000000000C5 /* Debug */,
+				D0C0000000000000000000C6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

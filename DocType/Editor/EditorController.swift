@@ -257,7 +257,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         isDirty = true
-        if let storage = textView.textStorage { styler.restylePending(in: storage) }
+        if let storage = textView.textStorage { styler.applyPendingStyles(in: storage) }
         scheduleAutosave()
     }
 

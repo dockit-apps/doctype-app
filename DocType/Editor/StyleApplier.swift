@@ -1,10 +1,14 @@
-// Keeps the editor's markdown styling up to date as you type.
+// Keeps the editor's markdown styling up to date as you type, in two steps:
 //
-// On every edit, NSTextStorage calls `willProcessEditing`. Apple documents this
-// hook as the place to adjust attributes, and it runs before attribute fixing,
-// so emoji and other characters still get font fallback. Here we update the
-// BlockMap and restyle only the dirty blocks (DocTypeCore decides the spans;
-// EditorTheme turns them into fonts and colors).
+// 1. During an edit (`willProcessEditing`) only the BlockMap is updated and the
+//    dirty range remembered. Attributes are NOT changed here: that would enlarge
+//    the range TextKit 2 treats as replaced, and it would move the cursor to the
+//    end of that range (typing in the middle of a note jumped lines).
+// 2. After the edit (`applyPendingStyles`, called from textDidChange) the dirty
+//    blocks are restyled as a separate, attribute-only edit, which leaves the
+//    selection alone.
+//
+// DocTypeCore decides the spans; EditorTheme turns them into fonts and colors.
 
 import AppKit
 import DocTypeCore
@@ -35,30 +39,36 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         range editedRange: NSRange, changeInLength delta: Int
     ) {
         guard editedMask.contains(.editedCharacters), !isReplacingDocument else { return }
+
+        let dirty = blockMap.update(text: textStorage.mutableString, editedRange: editedRange, changeInLength: delta)
+        // Several edits can happen before styles are applied (e.g. while an input
+        // method is composing), so earlier ranges move with later edits.
+        let previous = pendingRange.map { Self.shift($0, by: editedRange, delta: delta) }
+        pendingRange = previous.map { NSUnionRange($0, dirty) } ?? dirty
+    }
+
+    /// Restyles everything edited since the last call, as an attribute-only edit.
+    /// Call after each text change. Waits while an input method is composing,
+    /// because changing attributes mid-composition can disturb it.
+    func applyPendingStyles(in storage: NSTextStorage) {
+        guard let pending = pendingRange, textView?.hasMarkedText() != true else { return }
+        pendingRange = nil
         let state = DocTypeCore.signposter.beginInterval("Restyle")
         defer { DocTypeCore.signposter.endInterval("Restyle", state) }
 
-        let dirty = blockMap.update(text: textStorage.mutableString, editedRange: editedRange, changeInLength: delta)
-        if textView?.hasMarkedText() == true {
-            // Changing attributes mid-composition can disturb the input method;
-            // remember the range and style it when composition ends.
-            let previous = pendingRange.map { Self.shift($0, by: editedRange, delta: delta) }
-            pendingRange = previous.map { NSUnionRange($0, dirty) } ?? dirty
-            return
-        }
-        apply(dirty, in: textStorage)
-    }
-
-    /// Styles text that was skipped while composing. Call after each text change.
-    func restylePending(in storage: NSTextStorage) {
-        guard let pending = pendingRange, textView?.hasMarkedText() != true else { return }
-        pendingRange = nil
         let clamped = NSIntersectionRange(pending, NSRange(location: 0, length: storage.length))
         let blocks = blockMap.blocks(in: clamped)
         guard let first = blocks.first, let last = blocks.last else { return }
-        storage.beginEditing()
-        apply(NSUnionRange(first.range, last.range), in: storage)
-        storage.endEditing()
+        let apply = {
+            storage.beginEditing()
+            self.apply(NSUnionRange(first.range, last.range), in: storage)
+            storage.endEditing()
+        }
+        if let contentStorage = textView?.textContentStorage {
+            contentStorage.performEditingTransaction(apply)
+        } else {
+            apply()
+        }
     }
 
     private func apply(_ range: NSRange, in storage: NSTextStorage) {

@@ -50,7 +50,9 @@ final class AppModel {
 
     init() {
         editor.onError = { [weak self] message in self?.errorMessage = message }
-        if let url = LibraryBookmark.load() {
+        // When the app only hosts unit tests, don't open (and watch) the user's library.
+        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if !isTestHost, let url = LibraryBookmark.load() {
             open(url, restoring: UserDefaults.standard.string(forKey: Self.lastOpenNoteKey))
         }
     }
