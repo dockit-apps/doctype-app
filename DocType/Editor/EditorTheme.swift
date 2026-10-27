@@ -14,6 +14,10 @@ enum EditorTheme {
     static let quoteLineKey = NSAttributedString.Key("DocTypeQuoteLine")
     /// Marks a `---` line (drawn as a horizontal rule).
     static let ruleLineKey = NSAttributedString.Key("DocTypeRuleLine")
+    /// Marks a list bullet character (drawn as "•").
+    static let bulletKey = NSAttributedString.Key("DocTypeBullet")
+    /// Marks a task's "[ ]" (drawn as a checkbox); the value is true when checked.
+    static let taskKey = NSAttributedString.Key("DocTypeTask")
     /// Space between the quote bar and the quoted text.
     static let quoteIndent: CGFloat = 18
 
@@ -56,6 +60,14 @@ enum EditorTheme {
                 applyToLines(span.range, of: text) { _ in [.paragraphStyle: ruleParagraphStyle, ruleLineKey: true] }
             case .syntaxMarker where !span.isRevealed(by: selection), .hiddenMarker:
                 text.addAttributes(concealedAttributes, range: span.range)
+            case .strong:
+                convertFonts(in: span.range, of: text) { NSFontManager.shared.convert($0, toHaveTrait: .boldFontMask) }
+            case .emphasis:
+                convertFonts(in: span.range, of: text) { NSFontManager.shared.convert($0, toHaveTrait: .italicFontMask) }
+            case .inlineCode:
+                // Monospace at the surrounding size, so code in a heading stays heading-sized.
+                convertFonts(in: span.range, of: text) { .monospacedSystemFont(ofSize: $0.pointSize * 0.92, weight: .regular) }
+                text.addAttribute(.backgroundColor, value: NSColor.quaternarySystemFill, range: span.range)
             default:
                 text.addAttributes(attributes(for: span.style), range: span.range)
             }
@@ -74,8 +86,33 @@ enum EditorTheme {
             [.foregroundColor: color(for: token)]
         case .blockquote:
             [.foregroundColor: NSColor.secondaryLabelColor]
-        case .horizontalRule, .hiddenMarker:
-            [:]
+        case .strikethrough:
+            [.strikethroughStyle: NSUnderlineStyle.single.rawValue]
+        case .link:
+            [.foregroundColor: NSColor.linkColor]
+        case .listBullet:
+            // Keeps its width; BlockDecorations draws a bullet there.
+            [.foregroundColor: NSColor.clear, bulletKey: true]
+        case .listNumber, .completedTask:
+            [.foregroundColor: NSColor.secondaryLabelColor]
+        case .taskBox(let checked):
+            // Keeps its width; BlockDecorations draws a checkbox there.
+            [.foregroundColor: NSColor.clear, taskKey: checked]
+        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode:
+            [:]  // handled in apply(_:to:resetting:selection:)
+        }
+    }
+
+    /// Replaces each font run in `range` with `transform(font)`, keeping sizes
+    /// from headings and other styles applied before.
+    private static func convertFonts(in range: NSRange, of text: NSMutableAttributedString,
+                                     _ transform: (NSFont) -> NSFont) {
+        var runs: [(NSRange, NSFont)] = []
+        text.enumerateAttribute(.font, in: range) { value, runRange, _ in
+            runs.append((runRange, value as? NSFont ?? bodyFont))
+        }
+        for (runRange, font) in runs {
+            text.addAttribute(.font, value: transform(font), range: runRange)
         }
     }
 
@@ -156,9 +193,4 @@ enum EditorTheme {
                            blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
         }
     }
-}
-
-/// Where a line sits in its code block; decides which corners of the box are rounded.
-nonisolated enum CodeBlockLinePosition: Int {
-    case first, middle, last, only
 }

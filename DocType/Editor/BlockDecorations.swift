@@ -1,10 +1,11 @@
-// Draws block decorations behind the text, the way chat apps and Obsidian do:
-// code blocks as one rounded box, block quotes with a bar on the left, and
-// `---` lines as a horizontal rule.
+// Draws decorations behind and over the text, the way chat apps and Obsidian do:
+// code blocks as one rounded box, block quotes with a bar on the left, `---` as a
+// horizontal rule, list bullets as "•" and tasks as checkboxes.
 //
-// TextKit 2 lays out each paragraph in its own layout fragment. For lines that
-// EditorTheme marked, this delegate returns a fragment subclass that paints the
-// decoration and then draws the text on top.
+// TextKit 2 lays out each paragraph in its own layout fragment. EditorTheme marks
+// lines and characters with attributes; this delegate reads them and returns a
+// fragment that paints the decorations. One fragment class handles all of them,
+// so a line can have several (a task inside a quote).
 
 import AppKit
 
@@ -17,141 +18,188 @@ final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
         guard let paragraph = textElement as? NSTextParagraph, paragraph.attributedString.length > 0 else {
             return NSTextLayoutFragment(textElement: textElement, range: range)
         }
-        let attributes = paragraph.attributedString.attributes(at: 0, effectiveRange: nil)
-        if let raw = attributes[EditorTheme.codeBlockLineKey] as? Int, let position = CodeBlockLinePosition(rawValue: raw) {
-            return CodeBlockLayoutFragment(textElement: textElement, range: range, position: position)
+        let string = paragraph.attributedString
+        let lineAttributes = string.attributes(at: 0, effectiveRange: nil)
+        var decorations = Decorations()
+        if let raw = lineAttributes[EditorTheme.codeBlockLineKey] as? Int {
+            decorations.codeBlock = CodeBlockLinePosition(rawValue: raw)
         }
-        if attributes[EditorTheme.quoteLineKey] != nil {
-            return QuoteLayoutFragment(textElement: textElement, range: range)
+        decorations.quote = lineAttributes[EditorTheme.quoteLineKey] != nil
+        decorations.rule = lineAttributes[EditorTheme.ruleLineKey] != nil
+        let whole = NSRange(location: 0, length: string.length)
+        string.enumerateAttribute(EditorTheme.bulletKey, in: whole) { value, markRange, _ in
+            if value != nil { decorations.marks.append(ListMark(range: markRange, kind: .bullet)) }
         }
-        if attributes[EditorTheme.ruleLineKey] != nil {
-            return RuleLayoutFragment(textElement: textElement, range: range)
+        string.enumerateAttribute(EditorTheme.taskKey, in: whole) { value, markRange, _ in
+            if let checked = value as? Bool { decorations.marks.append(ListMark(range: markRange, kind: .task(checked: checked))) }
         }
-        return NSTextLayoutFragment(textElement: textElement, range: range)
+        guard decorations.isNeeded else { return NSTextLayoutFragment(textElement: textElement, range: range) }
+        return DecoratedLayoutFragment(textElement: textElement, range: range, decorations: decorations)
     }
 }
 
-/// A bar on the left edge of each quoted line; the lines' bars join into one.
-nonisolated final class QuoteLayoutFragment: NSTextLayoutFragment {
-    private static let barWidth: CGFloat = 3
-    private static let color = NSColor.tertiaryLabelColor
-
-    private var barRect: CGRect {
-        CGRect(x: -layoutFragmentFrame.minX + 2, y: 0, width: Self.barWidth, height: layoutFragmentFrame.height)
-    }
-
-    override var renderingSurfaceBounds: CGRect { super.renderingSurfaceBounds.union(barRect) }
-
-    override func draw(at point: CGPoint, in context: CGContext) {
-        context.saveGState()
-        context.setFillColor(Self.color.cgColor)
-        context.fill(barRect.offsetBy(dx: point.x, dy: point.y))
-        context.restoreGState()
-        super.draw(at: point, in: context)
-    }
+/// Where a line sits in its code block; decides which corners of the box are rounded.
+nonisolated enum CodeBlockLinePosition: Int {
+    case first, middle, last, only
 }
 
-/// A thin line across the full width, vertically centered in the `---` line.
-nonisolated final class RuleLayoutFragment: NSTextLayoutFragment {
-    private var lineRect: CGRect {
-        let width = textLayoutManager?.textContainer?.size.width ?? layoutFragmentFrame.maxX
-        return CGRect(x: -layoutFragmentFrame.minX, y: (layoutFragmentFrame.height / 2).rounded(), width: width, height: 1)
-    }
+nonisolated struct ListMark {
+    enum Kind { case bullet, task(checked: Bool) }
+    /// Range of the marker characters within the paragraph.
+    let range: NSRange
+    let kind: Kind
+}
 
-    override var renderingSurfaceBounds: CGRect { super.renderingSurfaceBounds.union(lineRect) }
-
-    override func draw(at point: CGPoint, in context: CGContext) {
-        context.saveGState()
-        context.setFillColor(NSColor.separatorColor.cgColor)
-        context.fill(lineRect.offsetBy(dx: point.x, dy: point.y))
-        context.restoreGState()
-        super.draw(at: point, in: context)
-    }
+nonisolated struct Decorations {
+    var codeBlock: CodeBlockLinePosition?
+    var quote = false
+    var rule = false
+    var marks: [ListMark] = []
+    var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty }
 }
 
 /// `nonisolated`: TextKit 2 may lay out and draw fragments off the main thread.
-nonisolated final class CodeBlockLayoutFragment: NSTextLayoutFragment {
+nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
+    private let decorations: Decorations
+
+    private static let codeFill = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.045)
+    private static let codeBorder = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.10)
     private static let cornerRadius: CGFloat = 8
-    private static let fill = EditorTheme.dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.045)
-    private static let border = EditorTheme.dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.10)
+    /// Body text metrics, for centering bullets and checkboxes on a line.
+    private static let bodyMetrics: (xHeight: CGFloat, capHeight: CGFloat) = {
+        let font = NSFont.systemFont(ofSize: 15)
+        return (font.xHeight, font.capHeight)
+    }()
 
-    private let position: CodeBlockLinePosition
-
-    init(textElement: NSTextElement, range: NSTextRange?, position: CodeBlockLinePosition) {
-        self.position = position
+    init(textElement: NSTextElement, range: NSTextRange?, decorations: Decorations) {
+        self.decorations = decorations
         super.init(textElement: textElement, range: range)
     }
 
     required init?(coder: NSCoder) {
-        position = .middle
+        decorations = Decorations()
         super.init(coder: coder)
     }
 
-    /// The box spans the text container's full width. A fragment's own frame is only
-    /// as wide as its text and starts at the indent, so it can't be used directly.
-    private var boxInFragmentCoordinates: CGRect {
+    /// The text container's full width, in fragment coordinates. A fragment's own
+    /// frame is only as wide as its text and starts at the indent.
+    private var fullWidth: CGRect {
         let containerWidth = textLayoutManager?.textContainer?.size.width ?? layoutFragmentFrame.maxX
         return CGRect(x: -layoutFragmentFrame.minX, y: 0, width: containerWidth, height: layoutFragmentFrame.height)
     }
 
     override var renderingSurfaceBounds: CGRect {
-        super.renderingSurfaceBounds.union(boxInFragmentCoordinates)
+        super.renderingSurfaceBounds.union(fullWidth)
     }
 
     override func draw(at point: CGPoint, in context: CGContext) {
-        let box = boxInFragmentCoordinates.offsetBy(dx: point.x, dy: point.y).insetBy(dx: 0.5, dy: 0)
-        let roundTop = position == .first || position == .only
-        let roundBottom = position == .last || position == .only
+        let area = fullWidth.offsetBy(dx: point.x, dy: point.y)
         context.saveGState()
-        context.addPath(Self.fillPath(box, roundTop: roundTop, roundBottom: roundBottom))
-        context.setFillColor(Self.fill.cgColor)
-        context.fillPath()
-        context.addPath(Self.outlinePath(box, roundTop: roundTop, roundBottom: roundBottom))
-        context.setStrokeColor(Self.border.cgColor)
-        context.setLineWidth(1)
-        context.strokePath()
+        if let position = decorations.codeBlock { drawCodeBox(in: area.insetBy(dx: 0.5, dy: 0), position: position, context) }
+        if decorations.quote {
+            context.setFillColor(NSColor.tertiaryLabelColor.cgColor)
+            context.fill(CGRect(x: area.minX + 2, y: area.minY, width: 3, height: area.height))
+        }
+        if decorations.rule {
+            context.setFillColor(NSColor.separatorColor.cgColor)
+            context.fill(CGRect(x: area.minX, y: area.minY + (area.height / 2).rounded(), width: area.width, height: 1))
+        }
         context.restoreGState()
         super.draw(at: point, in: context)
+        for mark in decorations.marks { draw(mark, at: point, context) }
     }
 
-    /// The line's part of the box, closed, with rounded corners only at the block's ends.
-    private static func fillPath(_ box: CGRect, roundTop: Bool, roundBottom: Bool) -> CGPath {
-        let path = CGMutablePath()
-        let top = roundTop ? min(cornerRadius, box.height / 2) : 0
-        let bottom = roundBottom ? min(cornerRadius, box.height / 2) : 0
+    // MARK: - Bullets and checkboxes
+
+    private func draw(_ mark: ListMark, at point: CGPoint, _ context: CGContext) {
+        guard let line = textLineFragments.first(where: { NSLocationInRange(mark.range.location, $0.characterRange) })
+        else { return }
+        let start = line.locationForCharacter(at: mark.range.location)
+        let end = line.locationForCharacter(at: mark.range.upperBound)
+        let centerX = point.x + line.typographicBounds.minX + (start.x + end.x) / 2
+        let baseline = point.y + line.typographicBounds.minY + line.glyphOrigin.y
+
+        context.saveGState()
+        switch mark.kind {
+        case .bullet:
+            let size: CGFloat = 5.5
+            let centerY = baseline - Self.bodyMetrics.xHeight / 2
+            context.setFillColor(NSColor.secondaryLabelColor.cgColor)
+            context.fillEllipse(in: CGRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
+        case .task(let checked):
+            let size: CGFloat = 14
+            let centerY = baseline - Self.bodyMetrics.capHeight / 2
+            let box = CGRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size)
+            let path = CGPath(roundedRect: box, cornerWidth: 4, cornerHeight: 4, transform: nil)
+            if checked {
+                context.setFillColor(NSColor.controlAccentColor.cgColor)
+                context.addPath(path)
+                context.fillPath()
+                // Checkmark (y grows downward in the editor's flipped coordinates).
+                context.setStrokeColor(NSColor.white.cgColor)
+                context.setLineWidth(1.8)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                context.move(to: CGPoint(x: box.minX + 3.5, y: box.midY + 0.5))
+                context.addLine(to: CGPoint(x: box.minX + 6, y: box.maxY - 3.5))
+                context.addLine(to: CGPoint(x: box.maxX - 3.2, y: box.minY + 3.8))
+                context.strokePath()
+            } else {
+                context.setStrokeColor(NSColor.tertiaryLabelColor.cgColor)
+                context.setLineWidth(1.3)
+                context.addPath(CGPath(roundedRect: box.insetBy(dx: 0.65, dy: 0.65), cornerWidth: 3.5, cornerHeight: 3.5,
+                                       transform: nil))
+                context.strokePath()
+            }
+        }
+        context.restoreGState()
+    }
+
+    // MARK: - Code box
+
+    /// The line's part of the box: rounded corners only at the block's first and
+    /// last lines, and a border on the outer edges only, so the lines join up.
+    private func drawCodeBox(in box: CGRect, position: CodeBlockLinePosition, _ context: CGContext) {
+        let roundTop = position == .first || position == .only
+        let roundBottom = position == .last || position == .only
+        let top = roundTop ? min(Self.cornerRadius, box.height / 2) : 0
+        let bottom = roundBottom ? min(Self.cornerRadius, box.height / 2) : 0
+
         // In the flipped view, minY is the top edge.
-        path.move(to: CGPoint(x: box.minX + top, y: box.minY))
-        path.addArc(tangent1End: CGPoint(x: box.maxX, y: box.minY), tangent2End: CGPoint(x: box.maxX, y: box.maxY), radius: top)
-        path.addArc(tangent1End: CGPoint(x: box.maxX, y: box.maxY), tangent2End: CGPoint(x: box.minX, y: box.maxY), radius: bottom)
-        path.addArc(tangent1End: CGPoint(x: box.minX, y: box.maxY), tangent2End: CGPoint(x: box.minX, y: box.minY), radius: bottom)
-        path.addArc(tangent1End: CGPoint(x: box.minX, y: box.minY), tangent2End: CGPoint(x: box.maxX, y: box.minY), radius: top)
-        path.closeSubpath()
-        return path
+        let fill = CGMutablePath()
+        fill.move(to: CGPoint(x: box.minX + top, y: box.minY))
+        fill.addArc(tangent1End: CGPoint(x: box.maxX, y: box.minY), tangent2End: CGPoint(x: box.maxX, y: box.maxY), radius: top)
+        fill.addArc(tangent1End: CGPoint(x: box.maxX, y: box.maxY), tangent2End: CGPoint(x: box.minX, y: box.maxY), radius: bottom)
+        fill.addArc(tangent1End: CGPoint(x: box.minX, y: box.maxY), tangent2End: CGPoint(x: box.minX, y: box.minY), radius: bottom)
+        fill.addArc(tangent1End: CGPoint(x: box.minX, y: box.minY), tangent2End: CGPoint(x: box.maxX, y: box.minY), radius: top)
+        fill.closeSubpath()
+        context.addPath(fill)
+        context.setFillColor(Self.codeFill.cgColor)
+        context.fillPath()
+
+        let outline = CGMutablePath()
+        outline.move(to: CGPoint(x: box.minX, y: box.minY + top))
+        outline.addLine(to: CGPoint(x: box.minX, y: box.maxY - bottom))
+        if roundBottom {
+            outline.addArc(tangent1End: CGPoint(x: box.minX, y: box.maxY), tangent2End: CGPoint(x: box.minX + bottom, y: box.maxY), radius: bottom)
+            outline.addLine(to: CGPoint(x: box.maxX - bottom, y: box.maxY))
+            outline.addArc(tangent1End: CGPoint(x: box.maxX, y: box.maxY), tangent2End: CGPoint(x: box.maxX, y: box.maxY - bottom), radius: bottom)
+        } else {
+            outline.move(to: CGPoint(x: box.maxX, y: box.maxY))
+        }
+        outline.addLine(to: CGPoint(x: box.maxX, y: box.minY + top))
+        if roundTop {
+            outline.addArc(tangent1End: CGPoint(x: box.maxX, y: box.minY), tangent2End: CGPoint(x: box.maxX - top, y: box.minY), radius: top)
+            outline.addLine(to: CGPoint(x: box.minX + top, y: box.minY))
+            outline.addArc(tangent1End: CGPoint(x: box.minX, y: box.minY), tangent2End: CGPoint(x: box.minX, y: box.minY + top), radius: top)
+        }
+        context.addPath(outline)
+        context.setStrokeColor(Self.codeBorder.cgColor)
+        context.setLineWidth(1)
+        context.strokePath()
     }
 
-    /// The border: the sides always, the top and bottom edges only at the block's
-    /// ends, so no lines are drawn between the lines of code.
-    private static func outlinePath(_ box: CGRect, roundTop: Bool, roundBottom: Bool) -> CGPath {
-        let path = CGMutablePath()
-        let top = roundTop ? min(cornerRadius, box.height / 2) : 0
-        let bottom = roundBottom ? min(cornerRadius, box.height / 2) : 0
-        // Left side, from the top down.
-        path.move(to: CGPoint(x: box.minX, y: box.minY + top))
-        path.addLine(to: CGPoint(x: box.minX, y: box.maxY - bottom))
-        if roundBottom {
-            path.addArc(tangent1End: CGPoint(x: box.minX, y: box.maxY), tangent2End: CGPoint(x: box.minX + bottom, y: box.maxY), radius: bottom)
-            path.addLine(to: CGPoint(x: box.maxX - bottom, y: box.maxY))
-            path.addArc(tangent1End: CGPoint(x: box.maxX, y: box.maxY), tangent2End: CGPoint(x: box.maxX, y: box.maxY - bottom), radius: bottom)
-        } else {
-            path.move(to: CGPoint(x: box.maxX, y: box.maxY))
-        }
-        // Right side, from the bottom up.
-        path.addLine(to: CGPoint(x: box.maxX, y: box.minY + top))
-        if roundTop {
-            path.addArc(tangent1End: CGPoint(x: box.maxX, y: box.minY), tangent2End: CGPoint(x: box.maxX - top, y: box.minY), radius: top)
-            path.addLine(to: CGPoint(x: box.minX + top, y: box.minY))
-            path.addArc(tangent1End: CGPoint(x: box.minX, y: box.minY), tangent2End: CGPoint(x: box.minX, y: box.minY + top), radius: top)
-        }
-        return path
+    private static func dynamic(light: Int, dark: Int, alpha: CGFloat) -> NSColor {
+        EditorTheme.dynamic(light: light, dark: dark, alpha: alpha)
     }
 }

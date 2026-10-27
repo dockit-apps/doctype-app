@@ -33,6 +33,11 @@ struct InlineStylingTests {
         #expect(has("**bold `code`**", "`code`", .inlineCode))
     }
 
+    @Test func inlineStylesInsideHeadingsAreApplied() {
+        #expect(has("## Steps with `bfs()`", "`bfs()`", .inlineCode))
+        #expect(has("# A **bold** title", "**bold**", .strong))
+    }
+
     @Test func unclosedAndEscapedMarkersStayPlain() {
         #expect(styled("**abc").isEmpty)
         #expect(styled(#"\*not italic\*"#).isEmpty)

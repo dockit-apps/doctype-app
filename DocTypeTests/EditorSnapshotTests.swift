@@ -16,7 +16,23 @@ struct EditorSnapshotTests {
     static let sample = """
         # Lecture 4: Graphs
 
-        Breadth-first search visits nodes **level by level**.
+        Breadth-first search visits nodes **level by level**, *not* depth first. It's ~~slow~~ fast and uses a `queue`.
+        Read [the lecture notes](https://example.com/bfs) before Friday.
+
+        ## Steps with `bfs()`
+
+        - Start at the source
+        - Visit its neighbors
+          - nested detail
+        1. Mark visited
+        2. Repeat
+
+        - [ ] Review chapter 4
+        - [x] Finish exercise sheet
+
+        | Algorithm | Time |
+        |-----------|------|
+        | BFS       | O(V+E) |
 
         ```swift
         struct Graph {
@@ -49,9 +65,10 @@ struct EditorSnapshotTests {
         "end": "after the code.",       // nothing revealed
         "heading": "Lecture 4",          // the heading's "#" shows
         "code": "let start",             // the Swift block's fences show
+        "inline": "depth first",         // the first paragraph line's ** * ~~ ` show
     ]
 
-    @Test(arguments: ["light-end", "dark-end", "light-heading", "light-code"])
+    @Test(arguments: ["light-end", "dark-end", "light-heading", "light-code", "light-inline"])
     func renderSampleNote(variant: String) async throws {
         let parts = variant.split(separator: "-").map(String.init)
         let (appearance, cursor) = (parts[0], parts[1])
@@ -64,7 +81,7 @@ struct EditorSnapshotTests {
         editor.library = Library(root: folder)
         #expect(await editor.open("Sample.md"))
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 860),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 1240),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         window.contentView = editor.scrollView

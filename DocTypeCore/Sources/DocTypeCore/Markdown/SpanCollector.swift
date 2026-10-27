@@ -51,6 +51,7 @@ struct SpanCollector: MarkupWalker {
     }
 
     mutating func visitHeading(_ heading: Heading) {
+        defer { descendInto(heading) }  // inline styles inside the heading text
         guard let range = localRange(heading) else { return }
         let firstLine = source.lineRange(for: NSRange(location: range.location, length: 0))
         let lineText = source.substring(with: firstLine) as NSString

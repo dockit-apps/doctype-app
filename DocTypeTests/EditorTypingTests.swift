@@ -262,5 +262,48 @@ struct EditorTypingTests {
 
         #expect(textView.selectedRange() == NSRange(location: 8, length: 0))
     }
+
+    // MARK: Lists and tasks
+
+    @Test func bulletAppearsOnlyAfterTypingASpace() async throws {
+        let (editor, folder) = try await editor(showing: "")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        type("-", in: textView)
+        #expect(!hasAttribute(EditorTheme.bulletKey, at: 0, in: textView))  // plain "-"
+
+        type(" milk", in: textView)
+        #expect(hasAttribute(EditorTheme.bulletKey, at: 0, in: textView))   // drawn as a bullet
+    }
+
+    @Test func taskBoxNeedsASpaceAfterTheBrackets() async throws {
+        let (editor, folder) = try await editor(showing: "")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        type("- [ ]", in: textView)
+        #expect(!hasAttribute(EditorTheme.taskKey, at: 2, in: textView))
+
+        type(" eggs", in: textView)
+        #expect(textView.textStorage?.attribute(EditorTheme.taskKey, at: 2, effectiveRange: nil) as? Bool == false)
+    }
+
+    @Test func boldMarkersHideWhenLeavingTheLine() async throws {
+        let (editor, folder) = try await editor(showing: "")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        type("a **b** c", in: textView)
+        #expect(!isHidden(at: 2, in: textView))  // "**" visible on the cursor's line
+        #expect(font(at: 4, in: textView).map { NSFontManager.shared.traits(of: $0).contains(.boldFontMask) } == true)
+
+        type("\nnext", in: textView)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(isHidden(at: 2, in: textView))
+    }
 }
 
