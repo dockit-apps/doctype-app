@@ -8,4 +8,7 @@ public enum DocTypeCore {
 
     /// Intervals show up under "Points of Interest" in Instruments.
     public static let signposter = OSSignposter(subsystem: subsystem, category: .pointsOfInterest)
+
+    /// For problems that are caught but mean a bug (e.g. styling with a stale block map).
+    public static let logger = Logger(subsystem: subsystem, category: "editor")
 }

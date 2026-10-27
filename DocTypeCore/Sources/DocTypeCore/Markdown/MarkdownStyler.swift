@@ -14,6 +14,7 @@
 
 import Foundation
 import Markdown
+import os
 
 public enum MarkdownStyler {
     /// Spans for the given blocks of `text`.
@@ -30,7 +31,14 @@ public enum MarkdownStyler {
     }
 
     static func spans(for block: Block, in text: NSString) -> [StyleSpan] {
-        switch block.kind {
+        // A block from a map that doesn't match this text would make NSString throw;
+        // an Objective-C exception inside a Swift task corrupts the concurrency
+        // runtime, so refuse it instead (the caller's map is out of date).
+        guard block.range.location >= 0, NSMaxRange(block.range) <= text.length else {
+            DocTypeCore.logger.fault("Styling a block \(NSStringFromRange(block.range)) outside the text (length \(text.length))")
+            return []
+        }
+        return switch block.kind {
         case .code: codeBlockSpans(block, in: text)
         case .text: textBlockSpans(block, in: text)
         }

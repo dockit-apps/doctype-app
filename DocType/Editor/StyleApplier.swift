@@ -30,12 +30,15 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         let attributed = NSMutableAttributedString(string: text)
         EditorTheme.apply(spans, to: attributed, resetting: NSRange(location: 0, length: attributed.length),
                           selection: selection)
-        styledSelection = selection
-        isReplacingDocument = true
-        storage.setAttributedString(attributed)
-        isReplacingDocument = false
+        // The new map goes in before the new text, and nothing restyles during the
+        // swap: TextKit adjusts the selection (and tells the delegate) in the middle
+        // of it, while the text is already styled for `selection`.
         self.blockMap = blockMap
+        styledSelection = selection
         pendingRange = nil
+        isReplacingDocument = true
+        defer { isReplacingDocument = false }
+        storage.setAttributedString(attributed)
     }
 
     func textStorage(
@@ -69,7 +72,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     /// Shows the markers on the line the cursor moved to and hides the ones it left.
     /// Only the blocks around the old and new cursor are restyled.
     func selectionDidChange(in storage: NSTextStorage) {
-        guard let textView, pendingRange == nil, !textView.hasMarkedText() else { return }
+        guard let textView, pendingRange == nil, !isReplacingDocument, !textView.hasMarkedText() else { return }
         let selection = textView.selectedRange()
         let previous = styledSelection
         let text = storage.mutableString
@@ -93,7 +96,13 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         let blockRanges = ranges.compactMap { range -> NSRange? in
             let blocks = blockMap.blocks(in: Self.clamp(range, toLength: storage.length))
             guard let first = blocks.first, let last = blocks.last else { return nil }
-            return NSUnionRange(first.range, last.range)
+            let union = NSUnionRange(first.range, last.range)
+            // A map that doesn't fit the text is a bug; never pass it to NSString.
+            guard NSMaxRange(union) <= storage.length else {
+                DocTypeCore.logger.fault("Block map out of date: \(NSStringFromRange(union)) in \(storage.length) characters")
+                return nil
+            }
+            return union
         }
         guard !blockRanges.isEmpty else { return }
         let selection = textView?.selectedRange() ?? NSRange(location: 0, length: 0)

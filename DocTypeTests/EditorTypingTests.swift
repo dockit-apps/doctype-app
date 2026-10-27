@@ -432,4 +432,34 @@ struct EditorTypingTests {
         type("done", in: textView)
         #expect(textView.string == "- groceries\n  - milk\n- eggs\ndone")
     }
+
+    // MARK: Switching notes
+
+    /// Regression: opening a shorter note made TextKit fix the selection mid-swap,
+    /// and restyling then used the previous note's block map (NSRangeException
+    /// inside a Swift task, which later crashed the app with EXC_BAD_ACCESS).
+    @Test func openingAShorterNoteAfterALongOneDoesNotRestyleWithTheOldBlocks() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "DocTypeAppTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let long = "# Long\n\n" + String(repeating: "A long first paragraph with **bold** words. ", count: 20) + "\n\n- item\n"
+        try long.write(to: folder.appending(path: "Long.md"), atomically: true, encoding: .utf8)
+        try "# Short\n\nTiny.\n".write(to: folder.appending(path: "Short.md"), atomically: true, encoding: .utf8)
+        let editor = EditorController()
+        editor.library = Library(root: folder)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+
+        #expect(await editor.open("Long.md"))
+        editor.textView.setSelectedRange(NSRange(location: (long as NSString).length - 3, length: 0))  // far down
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await editor.open("Short.md"))
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(editor.textView.string == "# Short\n\nTiny.\n")
+        #expect(font(at: 3, in: editor.textView)?.pointSize == 26)  // styled for the new note
+        #expect(await editor.open("Long.md"))
+        #expect(editor.textView.string == long)
+    }
 }

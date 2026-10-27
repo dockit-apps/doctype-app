@@ -8,6 +8,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var keyMonitor: Any?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // By default AppKit catches Objective-C exceptions and carries on. When one
+        // passes through Swift async code, the concurrency runtime is left corrupted
+        // and the app later crashes somewhere unrelated or hangs. Crash right away
+        // instead, with the real cause in the report (autosave keeps the loss to ~1 s).
+        UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menus can show only one shortcut per item; extra ones (⇧⌘P for the
         // palette) are caught here and run the same command.
