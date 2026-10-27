@@ -1,4 +1,5 @@
-// Sidebar: "All Notes" plus the notebook folder tree. Selecting an item filters the note list.
+// Sidebar: "All Notes", the notebook folder tree and the tags with their note
+// counts. Selecting an item filters the note list.
 
 import DocTypeCore
 import SwiftUI
@@ -17,6 +18,16 @@ struct SidebarView: View {
                     OutlineGroup(model.index.notebooks, children: \.children) { notebook in
                         Label(notebook.name, systemImage: "folder")
                             .tag(LibraryIndex.Filter.notebook(notebook.path))
+                    }
+                }
+            }
+
+            if !model.tagCounts.isEmpty {
+                Section("Tags") {
+                    ForEach(model.tagCounts, id: \.name) { tag in
+                        Label(tag.name, systemImage: "number")
+                            .badge(tag.count)
+                            .tag(LibraryIndex.Filter.tag(tag.name))
                     }
                 }
             }

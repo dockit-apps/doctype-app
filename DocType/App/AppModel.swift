@@ -11,8 +11,13 @@ import SwiftUI
 final class AppModel {
     private(set) var libraryURL: URL?
     private(set) var index = LibraryIndex() {
-        didSet { refreshVisibleNotes() }
+        didSet {
+            refreshVisibleNotes()
+            tagCounts = index.tagCounts()
+        }
     }
+    /// Every tag in the library with its note count (the sidebar's Tags section).
+    private(set) var tagCounts: [TagCount] = []
     private(set) var isScanning = false
     /// The library folder was moved or deleted while open.
     private(set) var isLibraryMissing = false
@@ -106,11 +111,12 @@ final class AppModel {
     }
 
     /// Creates `Untitled.md` in the selected notebook (or the library root), opens it
-    /// and puts the cursor in the title field.
+    /// and puts the cursor in the title field. While a tag is selected, the note
+    /// gets that tag, so it shows up in the list you're looking at.
     func createNote() async {
         guard let library else { return }
         do {
-            let path = try await library.createNote(in: selectedNotebook)
+            let path = try await library.createNote(in: selectedNotebook, tags: selectedTag.map { [$0] } ?? [])
             focusTitleOnNextOpen = true
             selectedNotePath = path
         } catch {

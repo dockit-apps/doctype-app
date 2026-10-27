@@ -14,7 +14,9 @@ struct CommandPaletteView: View {
     @FocusState private var isFieldFocused: Bool
 
     private var results: [PaletteItem] {
-        FuzzyMatch.rank(palette.items, by: query) { $0.title }
+        let matches = FuzzyMatch.rank(palette.items, by: query) { $0.title }
+        guard let extra = palette.itemForQuery?(query) else { return matches }
+        return matches + [extra]
     }
 
     var body: some View {

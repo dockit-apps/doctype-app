@@ -1,5 +1,5 @@
 // Above the editor: the note's title (its filename, editable to rename it) and
-// a read-only row of its tags. Tag editing arrives in Phase 9.
+// its tags. "+" adds a tag; right-clicking a tag removes it.
 
 import SwiftUI
 
@@ -30,9 +30,8 @@ struct NoteHeaderView: View {
                     if !focused { commit() }
                 }
 
-            if !model.editor.tags.isEmpty {
-                TagRow(tags: model.editor.tags)
-            }
+            TagRow(tags: model.editor.tags, onAdd: { model.showAddTagPicker() },
+                   onRemove: { model.editor.removeTag($0) })
         }
         .padding(.horizontal, 28)
         .padding(.top, 20)
@@ -55,9 +54,11 @@ struct NoteHeaderView: View {
     }
 }
 
-/// Tags as small capsules, e.g. `#exam  #week-3`.
+/// Tags as small capsules, e.g. `#exam  #week-3`, then a "+" to add one.
 struct TagRow: View {
     let tags: [String]
+    let onAdd: () -> Void
+    let onRemove: (String) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
@@ -67,9 +68,24 @@ struct TagRow: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(.quaternary, in: .capsule)
+                    .contextMenu {
+                        Button("Remove Tag “\(tag)”") { onRemove(tag) }
+                    }
+                    .accessibilityAction(named: "Remove Tag") { onRemove(tag) }
             }
+            Button(action: onAdd) {
+                if tags.isEmpty {
+                    Label("Add Tag", systemImage: "plus").font(.caption)
+                } else {
+                    Image(systemName: "plus").font(.caption)
+                }
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Add Tag (⇧⌘T)")
+            .accessibilityLabel("Add Tag")
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Tags: \(tags.joined(separator: ", "))")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tags.isEmpty ? "No tags" : "Tags: \(tags.joined(separator: ", "))")
     }
 }

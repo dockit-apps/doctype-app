@@ -16,8 +16,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Set while the note changed on disk and the editor has unsaved edits.
     /// Holds the disk text; autosave is paused until it's resolved.
     private(set) var pendingDiskText: String?
-    /// Tags from the open note's frontmatter (shown in the tag row).
-    private(set) var tags: [String] = []
+    /// Tags from the open note's frontmatter (shown in the tag row). Set only
+    /// here and in EditorController+Tags.
+    var tags: [String] = []
     /// The text view has keyboard focus.
     private(set) var hasFocus = false
 
@@ -26,10 +27,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored let styler = StyleApplier()
     @ObservationIgnored private let blockDecorations = BlockDecorations()
     @ObservationIgnored private(set) var path: String?
-    @ObservationIgnored private var frontmatter: Frontmatter?
+    @ObservationIgnored var frontmatter: Frontmatter?
     /// The note's full text as we last loaded it from or saved it to disk.
     @ObservationIgnored private var lastSyncedText = ""
-    @ObservationIgnored private var isDirty = false
+    @ObservationIgnored var isDirty = false
     @ObservationIgnored private var autosaveTask: Task<Void, Never>?
     /// True while the open note's file is being renamed or moved.
     @ObservationIgnored private var isMoving = false
@@ -271,7 +272,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
     }
 
-    private func scheduleAutosave() {
+    func scheduleAutosave() {
         autosaveTask?.cancel()
         guard pendingDiskText == nil else { return }
         autosaveTask = Task { [weak self] in

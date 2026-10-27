@@ -31,6 +31,10 @@ final class CommandRunner {
             Task { await model.trashSelectedNote() }
         case .renameNotebook:
             model.beginRenamingNotebook(model.selectedNotebook)
+        case .addTag:
+            model.showAddTagPicker()
+        case .removeTag:
+            model.showRemoveTagPicker()
         case .toggleSidebar:
             model.toggleSidebar()
         case .find:
@@ -77,6 +81,10 @@ final class CommandRunner {
             model.selectedNotePath != nil && !model.editor.hasFocus
         case .renameNotebook:
             !model.selectedNotebook.isEmpty
+        case .addTag:
+            model.selectedNotePath != nil
+        case .removeTag:
+            model.selectedNotePath != nil && !model.editor.tags.isEmpty
         case .find, .findAndReplace, .findNext, .findPrevious:
             model.selectedNotePath != nil
         case .bold, .italic, .inlineCode, .link, .heading1, .heading2, .heading3, .bodyText, .taskItem:

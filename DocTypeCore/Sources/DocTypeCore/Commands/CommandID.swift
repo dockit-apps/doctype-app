@@ -13,6 +13,8 @@ public enum CommandID: String, CaseIterable, Sendable {
     case moveNote = "note.move"
     case trashNote = "note.trash"
     case renameNotebook = "notebook.rename"
+    case addTag = "note.addTag"
+    case removeTag = "note.removeTag"
     case toggleSidebar = "view.toggleSidebar"
     case find = "edit.find"
     case findAndReplace = "edit.findAndReplace"
@@ -65,6 +67,10 @@ extension CommandID {
             Info(title: "Move to Trash", menu: .note, defaultShortcuts: [Shortcut(.delete, .command)])
         case .renameNotebook:
             Info(title: "Rename Notebook…", menu: .file, defaultShortcuts: [])
+        case .addTag:
+            Info(title: "Add Tag…", menu: .note, defaultShortcuts: [.command("t", .shift)])
+        case .removeTag:
+            Info(title: "Remove Tag…", menu: .note, defaultShortcuts: [])
         case .toggleSidebar:
             Info(title: "Toggle Sidebar", menu: .view, defaultShortcuts: [.command("s", [.control])])
         case .find:

@@ -1,5 +1,5 @@
 // What the palette shows: a list of items to filter and pick from.
-// Used for commands, and later as a picker (notebooks, tags).
+// Used for commands, and as a picker (notebooks, tags).
 
 struct PaletteItem: Identifiable {
     let id: String
@@ -12,4 +12,6 @@ struct PaletteItem: Identifiable {
 struct Palette {
     var placeholder: String
     var items: [PaletteItem]
+    /// An extra item made from what's typed, listed after the matches (e.g. "Create tag ‘x’").
+    var itemForQuery: ((String) -> PaletteItem?)? = nil
 }
