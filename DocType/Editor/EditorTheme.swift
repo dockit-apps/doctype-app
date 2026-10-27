@@ -39,11 +39,12 @@ enum EditorTheme {
     ]
 
     /// Resets `range` and applies `spans` (which must lie inside it). Markers the
-    /// `selection` doesn't reveal are hidden.
+    /// `selection` doesn't reveal are hidden; spans still unconfirmed at the cursor
+    /// (`---` without a space yet) are left out.
     static func apply(_ spans: [StyleSpan], to text: NSMutableAttributedString, resetting range: NSRange,
                       selection: NSRange) {
         text.setAttributes(baseAttributes, range: range)
-        for span in spans {
+        for span in spans where !span.isHeldBack(by: selection) {
             switch span.style {
             case .codeBlock:
                 applyCodeBlock(span.range, to: text)

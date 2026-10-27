@@ -6,6 +6,11 @@
 //
 // Within a block, container styles (heading, quote, code) come first and syntax
 // markers after, so a marker dims its color but keeps the heading's size.
+//
+// Constructs only format once their syntax is followed by a space, so nothing
+// jumps while you type: `>` stays plain until `> `, and `---` (or a setext
+// underline) stays plain on the cursor's line until a space follows it or the
+// cursor leaves the line (see StyleSpan.unconfirmedRange).
 
 import Foundation
 import Markdown
@@ -94,11 +99,24 @@ private struct SpanCollector: MarkupWalker {
     }
 
     /// Adds a marker that shows while the cursor is on its line (or in `revealIn`).
-    private mutating func marker(_ local: NSRange, revealIn reveal: NSRange? = nil) {
+    private mutating func marker(_ local: NSRange, revealIn reveal: NSRange? = nil, unconfirmedIn unconfirmed: NSRange? = nil) {
         guard local.length > 0 else { return }
         let line = reveal ?? lineWithoutBreak(containing: local.location)
         markerSpans.append(StyleSpan(NSRange(location: base + local.location, length: local.length), .syntaxMarker,
-                                     revealRange: NSRange(location: base + line.location, length: line.length)))
+                                     revealRange: shifted(line), unconfirmedRange: unconfirmed.map(shifted)))
+    }
+
+    private func shifted(_ local: NSRange) -> NSRange {
+        NSRange(location: base + local.location, length: local.length)
+    }
+
+    /// The line's range if its text doesn't end with a space or tab yet, i.e. the
+    /// syntax isn't confirmed while the cursor is on it; nil once it is.
+    private func unconfirmedLine(containing location: Int) -> NSRange? {
+        let line = lineWithoutBreak(containing: location)
+        guard line.length > 0 else { return line }
+        let last = source.character(at: line.upperBound - 1)
+        return last == 32 || last == 9 ? nil : line  // space, tab
     }
 
     private func lineWithoutBreak(containing location: Int) -> NSRange {
@@ -107,8 +125,8 @@ private struct SpanCollector: MarkupWalker {
         return NSRange(location: start, length: contentsEnd - start)
     }
 
-    private mutating func container(_ local: NSRange, _ style: Style) {
-        containerSpans.append(StyleSpan(NSRange(location: base + local.location, length: local.length), style))
+    private mutating func container(_ local: NSRange, _ style: Style, unconfirmedIn unconfirmed: NSRange? = nil) {
+        containerSpans.append(StyleSpan(shifted(local), style, unconfirmedRange: unconfirmed.map(shifted)))
     }
 
     mutating func visitHeading(_ heading: Heading) {
@@ -128,17 +146,27 @@ private struct SpanCollector: MarkupWalker {
                 marker(NSRange(location: firstLine.location + closing.location, length: trimmed.length))
             }
         } else {
-            container(range, .heading(level: heading.level))
             // Setext heading: the ==== or ---- underline is the last line of the range.
+            // While you're typing the underline it's unconfirmed, so starting a "-"
+            // list under a line of text doesn't flash a big heading.
             let lastLine = source.lineRange(for: NSRange(location: max(range.upperBound - 1, range.location), length: 0))
             let underline = (source.substring(with: lastLine) as NSString).trimmingCharacters(in: .newlines) as NSString
+            let unconfirmed = unconfirmedLine(containing: lastLine.location)
+            container(range, .heading(level: heading.level), unconfirmedIn: unconfirmed)
             marker(NSRange(location: lastLine.location, length: underline.length),
-                   revealIn: NSRange(location: range.location, length: lastLine.location + underline.length - range.location))
+                   revealIn: NSRange(location: range.location, length: lastLine.location + underline.length - range.location),
+                   unconfirmedIn: unconfirmed)
         }
     }
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
         guard let range = localRange(blockQuote) else { return }
+        // A quote needs "> ": a lone ">" or ">text" stays plain text.
+        let firstLine = source.substring(with: lineWithoutBreak(containing: range.location)) as NSString
+        guard firstLine.range(of: "^ {0,3}>[ \\t]", options: .regularExpression).location != NSNotFound else {
+            descendInto(blockQuote)
+            return
+        }
         container(range, .blockquote)
         // Dim the ">" (and ">>" for nested quotes) at the start of each line.
         var lineRanges: [NSRange] = []
@@ -158,8 +186,9 @@ private struct SpanCollector: MarkupWalker {
     mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) {
         guard let range = localRange(thematicBreak) else { return }
         let line = NSRange(location: range.location, length: trimmedLength(range))
-        container(line, .horizontalRule)
-        marker(line)
+        let unconfirmed = unconfirmedLine(containing: line.location)
+        container(line, .horizontalRule, unconfirmedIn: unconfirmed)
+        marker(line, unconfirmedIn: unconfirmed)
     }
 
     /// Code that swift-markdown finds inside a text block: indented code, or a

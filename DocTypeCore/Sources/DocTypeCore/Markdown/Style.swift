@@ -35,17 +35,33 @@ public struct StyleSpan: Equatable, Sendable {
     /// For markers: where the cursor must be for the marker to show (its line, or
     /// the whole code block for fences). Nil means always shown.
     public let revealRange: NSRange?
+    /// For constructs that aren't "confirmed" yet: while the cursor is in this range
+    /// the span isn't applied at all, so `---` stays plain dashes until you type a
+    /// space after it or leave the line. Nil means always applied.
+    public let unconfirmedRange: NSRange?
 
-    public init(_ range: NSRange, _ style: Style, revealRange: NSRange? = nil) {
+    public init(_ range: NSRange, _ style: Style, revealRange: NSRange? = nil, unconfirmedRange: NSRange? = nil) {
         self.range = range
         self.style = style
         self.revealRange = revealRange
+        self.unconfirmedRange = unconfirmedRange
     }
 
     /// True if a cursor or selection at `selection` should show this marker.
     /// Touching counts: a cursor at the end of the line reveals the line's markers.
     public func isRevealed(by selection: NSRange) -> Bool {
         guard let reveal = revealRange else { return true }
-        return selection.location <= reveal.upperBound && selection.upperBound >= reveal.location
+        return Self.touches(selection, reveal)
+    }
+
+    /// True if the span should be left out because the cursor is still on its
+    /// unconfirmed syntax.
+    public func isHeldBack(by selection: NSRange) -> Bool {
+        guard let unconfirmed = unconfirmedRange else { return false }
+        return Self.touches(selection, unconfirmed)
+    }
+
+    private static func touches(_ selection: NSRange, _ range: NSRange) -> Bool {
+        selection.location <= range.upperBound && selection.upperBound >= range.location
     }
 }

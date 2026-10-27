@@ -167,3 +167,56 @@ struct IncrementalStylingTests {
         }
     }
 }
+
+/// Constructs format only once a space follows their syntax (or, for `---` and
+/// setext underlines, once the cursor leaves the line).
+struct ConfirmationTests {
+    private func spans(_ text: String) -> [StyleSpan] {
+        let string = text as NSString
+        return MarkdownStyler.spans(in: string, blocks: BlockMap(text: string).blocks)
+    }
+
+    @Test(arguments: [">", ">text", "  >", ">\nnext"])
+    func quoteWithoutSpaceStaysPlain(text: String) {
+        #expect(!spans(text).contains { $0.style == .blockquote }, "\(text.debugDescription) became a quote")
+    }
+
+    @Test(arguments: ["> ", "> text", ">\ttext", "> one\n> two"])
+    func quoteWithSpaceIsAQuote(text: String) {
+        #expect(spans(text).contains { $0.style == .blockquote }, "\(text.debugDescription) didn't become a quote")
+    }
+
+    @Test func quoteMarkerIncludesTheSpaceSoTextStartsCleanly() {
+        let text = "> text" as NSString
+        let marker = spans(text as String).first { $0.style == .syntaxMarker }
+        #expect(marker.map { text.substring(with: $0.range) } == "> ")
+    }
+
+    @Test func ruleWithoutTrailingSpaceIsHeldBackOnlyOnItsLine() {
+        let text = "para\n\n---\n\nafter" as NSString
+        let rule = spans(text as String).first { $0.style == .horizontalRule }
+        #expect(rule?.unconfirmedRange == text.range(of: "---"))
+        #expect(rule?.isHeldBack(by: NSRange(location: 9, length: 0)) == true)    // cursor right after "---"
+        #expect(rule?.isHeldBack(by: NSRange(location: 13, length: 0)) == false)  // cursor on "after"
+    }
+
+    @Test func ruleWithTrailingSpaceIsConfirmed() {
+        let all = spans("para\n\n--- \n")
+        #expect(all.contains { $0.style == .horizontalRule && $0.unconfirmedRange == nil })
+        #expect(all.filter { $0.style == .syntaxMarker }.allSatisfy { $0.unconfirmedRange == nil })
+    }
+
+    @Test func setextUnderlineIsHeldBackWhileTypingIt() {
+        let text = "Title\n-" as NSString
+        let heading = spans(text as String).first { $0.style == .heading(level: 2) }
+        #expect(heading?.unconfirmedRange == NSRange(location: 6, length: 1))
+        #expect(heading?.isHeldBack(by: NSRange(location: 7, length: 0)) == true)
+        #expect(heading?.isHeldBack(by: NSRange(location: 2, length: 0)) == false)  // cursor on the title line
+    }
+
+    @Test func atxHeadingsNeedNoConfirmation() {
+        // "# " already needs a space in markdown itself.
+        #expect(spans("# Title").allSatisfy { $0.unconfirmedRange == nil })
+        #expect(!spans("#Title").contains { $0.style == .heading(level: 1) })
+    }
+}

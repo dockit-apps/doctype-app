@@ -136,5 +136,60 @@ struct EditorTypingTests {
         #expect(isHidden(at: 0, in: textView))
         #expect(storage.attribute(EditorTheme.quoteLineKey, at: 3, effectiveRange: nil) != nil)
     }
+
+    // MARK: Formatting starts only after a space
+
+    private func hasAttribute(_ key: NSAttributedString.Key, at location: Int, in textView: NSTextView) -> Bool {
+        textView.textStorage?.attribute(key, at: location, effectiveRange: nil) != nil
+    }
+
+    @Test func quoteAppearsOnlyAfterTypingASpace() async throws {
+        let (editor, folder) = try await editor(showing: "")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        type(">", in: textView)
+        #expect(!hasAttribute(EditorTheme.quoteLineKey, at: 0, in: textView))  // still a plain ">"
+
+        type(" Quoted", in: textView)
+        #expect(hasAttribute(EditorTheme.quoteLineKey, at: 0, in: textView))   // "> " made it a quote
+
+        type("\nNext", in: textView)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(isHidden(at: 0, in: textView) && isHidden(at: 1, in: textView))  // "> " hidden, space included
+    }
+
+    @Test func ruleAppearsAfterASpaceOrWhenLeavingTheLine() async throws {
+        let (editor, folder) = try await editor(showing: "Intro\n\n")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 7, length: 0))
+
+        type("---", in: textView)
+        #expect(!hasAttribute(EditorTheme.ruleLineKey, at: 7, in: textView))  // plain dashes while typing
+
+        type(" ", in: textView)
+        #expect(hasAttribute(EditorTheme.ruleLineKey, at: 7, in: textView))   // "--- " confirms it
+
+        // Without the space, leaving the line confirms it too.
+        textView.setSelectedRange(NSRange(location: 10, length: 1))
+        textView.insertText("", replacementRange: textView.selectedRange())  // remove the space again
+        #expect(!hasAttribute(EditorTheme.ruleLineKey, at: 7, in: textView))
+        type("\nAfter", in: textView)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(hasAttribute(EditorTheme.ruleLineKey, at: 7, in: textView))
+    }
+
+    @Test func dashUnderTextDoesNotFlashAHeadingWhileTyping() async throws {
+        let (editor, folder) = try await editor(showing: "Shopping\n")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 9, length: 0))
+
+        type("-", in: textView)
+
+        #expect(font(at: 0, in: textView)?.pointSize == 15)  // "Shopping" stays body text
+    }
 }
 
