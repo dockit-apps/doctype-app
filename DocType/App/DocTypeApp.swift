@@ -12,5 +12,6 @@ struct DocTypeApp: App {
             MainView()
                 .environment(appDelegate.model)
         }
+        .commands { AppMenus(model: appDelegate.model) }
     }
 }

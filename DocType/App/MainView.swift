@@ -6,10 +6,9 @@ import UniformTypeIdentifiers
 
 struct MainView: View {
     @Environment(AppModel.self) private var model
-    @State private var isChoosingLibrary = false
-
     var body: some View {
-        NavigationSplitView {
+        @Bindable var model = model
+        NavigationSplitView(columnVisibility: $model.columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } content: {
@@ -19,9 +18,11 @@ struct MainView: View {
             detail
         }
         .frame(minWidth: 800, minHeight: 500)
-        .fileImporter(isPresented: $isChoosingLibrary, allowedContentTypes: [.folder]) { result in
+        .fileImporter(isPresented: $model.isChoosingLibrary, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.chooseLibrary(url) }
         }
+        .overlay(alignment: .top) { paletteOverlay }
+        .animation(.snappy(duration: 0.15), value: model.palette != nil)
         .alert("Something went wrong", isPresented: errorIsPresented) {
             Button("OK") {}
         } message: {
@@ -36,7 +37,7 @@ struct MainView: View {
             } description: {
                 Text("DocType keeps your notes as Markdown files in a folder you choose.")
             } actions: {
-                Button("Choose Library…") { isChoosingLibrary = true }
+                Button("Choose Library…") { model.commands.run(.chooseLibrary) }
                     .buttonStyle(.glassProminent)
             }
         } else if model.isLibraryMissing {
@@ -45,7 +46,7 @@ struct MainView: View {
             } description: {
                 Text("The library folder was moved or deleted.")
             } actions: {
-                Button("Choose Library…") { isChoosingLibrary = true }
+                Button("Choose Library…") { model.commands.run(.chooseLibrary) }
                     .buttonStyle(.glassProminent)
             }
         } else if let path = model.selectedNotePath {
@@ -65,6 +66,23 @@ struct MainView: View {
                 .task(id: path) { await model.openSelectedNote() }
         } else {
             ContentUnavailableView("No Note Selected", systemImage: "square.and.pencil")
+        }
+    }
+
+    @ViewBuilder private var paletteOverlay: some View {
+        if let palette = model.palette {
+            ZStack(alignment: .top) {
+                // Clicking anywhere outside the palette closes it.
+                Color.black.opacity(0.001)
+                    .onTapGesture { model.dismissPalette() }
+                CommandPaletteView(
+                    palette: palette,
+                    onChoose: { model.choosePaletteItem($0) },
+                    onDismiss: { model.dismissPalette() }
+                )
+                .padding(.top, 60)
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
         }
     }
 

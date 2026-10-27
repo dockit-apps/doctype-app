@@ -2,9 +2,10 @@
 // and the editor. Views read from here and call its methods; file work happens in
 // DocTypeCore's Library actor.
 
+import AppKit
 import DocTypeCore
-import Foundation
 import Observation
+import SwiftUI
 
 @Observable
 final class AppModel {
@@ -17,6 +18,11 @@ final class AppModel {
     private(set) var isLibraryMissing = false
     var errorMessage: String?
 
+    var isChoosingLibrary = false
+    var columnVisibility: NavigationSplitViewVisibility = .all
+    /// The palette currently shown, if any.
+    private(set) var palette: Palette?
+
     var sidebarSelection: LibraryIndex.Filter? = .all {
         didSet { refreshVisibleNotes() }
     }
@@ -26,6 +32,10 @@ final class AppModel {
     var selectedNotePath: String?
 
     @ObservationIgnored let editor = EditorController()
+    @ObservationIgnored private(set) lazy var commands = CommandRunner(model: self)
+    /// Where keyboard focus was before the palette opened, to put it back after.
+    @ObservationIgnored private weak var focusBeforePalette: NSResponder?
+    @ObservationIgnored private var focusEditorOnNextOpen = false
     @ObservationIgnored private var library: Library?
     @ObservationIgnored private var updatesTask: Task<Void, Never>?
     @ObservationIgnored private var changesTask: Task<Void, Never>?
@@ -44,6 +54,61 @@ final class AppModel {
         visibleNotes = index.notes(matching: sidebarSelection ?? .all)
     }
 
+    var hasUsableLibrary: Bool { library != nil && !isLibraryMissing }
+
+    // MARK: - Commands
+
+    func showCommandPalette() {
+        let items = CommandID.allCases
+            .filter { $0 != .showCommandPalette && commands.isEnabled($0) }
+            .map { command in
+                PaletteItem(
+                    id: command.rawValue, title: command.title,
+                    detail: command.info.defaultShortcuts.first?.displayString,
+                    action: { [weak self] in self?.commands.run(command) }
+                )
+            }
+        showPalette(Palette(placeholder: "Type a command", items: items))
+    }
+
+    func showPalette(_ palette: Palette) {
+        if self.palette == nil { focusBeforePalette = NSApp.keyWindow?.firstResponder }
+        self.palette = palette
+    }
+
+    /// Closes the palette and runs the chosen item after focus is back where it was.
+    func choosePaletteItem(_ item: PaletteItem) {
+        dismissPalette()
+        item.action()
+    }
+
+    func dismissPalette() {
+        palette = nil
+        if let responder = focusBeforePalette {
+            NSApp.keyWindow?.makeFirstResponder(responder)
+        }
+        focusBeforePalette = nil
+    }
+
+    func toggleSidebar() {
+        columnVisibility = columnVisibility == .all ? .doubleColumn : .all
+    }
+
+    /// Creates `Untitled.md` in the selected notebook (or the library root) and opens it.
+    func createNote() async {
+        guard let library else { return }
+        let folder = if case .notebook(let path) = sidebarSelection { path } else { "" }
+        do {
+            let path = try await library.createNote(in: folder)
+            focusEditorOnNextOpen = true
+            selectedNotePath = path
+        } catch {
+            errorMessage = "Couldn't create a note: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Library
+
     func chooseLibrary(_ url: URL) {
         LibraryBookmark.save(url)
         UserDefaults.standard.removeObject(forKey: Self.lastOpenNoteKey)
@@ -58,7 +123,9 @@ final class AppModel {
     func openSelectedNote() async {
         guard let path = selectedNotePath else { return }
         let isLaunchRestore = !hasOpenedANote
-        if await editor.open(path, focus: isLaunchRestore) {
+        let focus = isLaunchRestore || focusEditorOnNextOpen
+        focusEditorOnNextOpen = false
+        if await editor.open(path, focus: focus) {
             hasOpenedANote = true
             UserDefaults.standard.set(path, forKey: Self.lastOpenNoteKey)
             if isLaunchRestore { LaunchTimer.logEditable() }
