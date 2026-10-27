@@ -1,4 +1,4 @@
-// Rules for naming note files: conflict copies now, collisions and invalid names in Phase 5.
+// Rules for naming note files: new notes, conflict copies; invalid names in Phase 5.
 
 import Foundation
 
@@ -19,6 +19,17 @@ public enum FileNaming {
         var counter = 2
         while exists(join(folder, name)) {
             name = "\(base) \(counter).md"
+            counter += 1
+        }
+        return join(folder, name)
+    }
+
+    /// `Untitled.md`, or `Untitled 2.md`, `Untitled 3.md`, … if taken, inside `folder`.
+    static func availableNotePath(title: String, in folder: String, exists: (String) -> Bool) -> String {
+        var name = "\(title).md"
+        var counter = 2
+        while exists(join(folder, name)) {
+            name = "\(title) \(counter).md"
             counter += 1
         }
         return join(folder, name)

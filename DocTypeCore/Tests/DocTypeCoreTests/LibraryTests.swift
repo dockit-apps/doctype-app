@@ -131,3 +131,31 @@ struct LibrarySaveTests {
         await #expect(throws: (any Error).self) { try await library.read("missing.md") }
     }
 }
+
+struct CreateNoteTests {
+    @Test func createsUntitledThenNumberedNames() async throws {
+        let folder = try TemporaryLibrary()
+        try folder.makeFolder("Uni")
+        let library = Library(root: folder.root)
+
+        let first = try await library.createNote(in: "Uni")
+        let second = try await library.createNote(in: "Uni")
+        let atRoot = try await library.createNote(in: "")
+
+        #expect(first == "Uni/Untitled.md")
+        #expect(second == "Uni/Untitled 2.md")
+        #expect(atRoot == "Untitled.md")
+        #expect(await library.index.notes[second] != nil)
+    }
+
+    @Test func existingFileWithDifferentCaseCountsAsTaken() async throws {
+        let folder = try TemporaryLibrary()
+        try folder.write("untitled.md", "keep me")
+        let library = Library(root: folder.root)
+
+        let path = try await library.createNote(in: "")
+
+        #expect(path == "Untitled 2.md")  // APFS is case-insensitive
+        #expect(try await library.read("untitled.md") == "keep me")
+    }
+}

@@ -72,6 +72,16 @@ public actor Library {
         updatesContinuation.yield(index)
     }
 
+    /// Creates an empty note in `folder` (`""` = library root), named `title`
+    /// or `title 2`, `title 3`, … if taken. Returns the new note's path.
+    public func createNote(in folder: String, title: String = "Untitled") throws -> String {
+        let path = FileNaming.availableNotePath(title: title, in: folder) { candidate in
+            FileManager.default.fileExists(atPath: url(for: candidate).path)
+        }
+        try save(path, text: "")
+        return path
+    }
+
     /// Saves `text` as a new note next to `path`, named like
     /// `Graphs (conflict 2026-10-27 135210).md`. Used so that resolving a conflict
     /// never throws text away. Falls back to the library root if the note's
