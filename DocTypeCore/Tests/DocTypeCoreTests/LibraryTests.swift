@@ -98,3 +98,36 @@ struct LibraryTests {
         return await library.index
     }
 }
+
+struct LibrarySaveTests {
+    @Test func saveWritesFileAndUpdatesIndex() async throws {
+        let folder = try TemporaryLibrary()
+        try folder.write("Uni/a.md", "old", modified: Date(timeIntervalSince1970: 1_000))
+        let library = Library(root: folder.root)
+        try await library.scan()
+
+        try await library.save("Uni/a.md", text: "---\ntags: [x]\n---\nnew text")
+
+        #expect(try await library.read("Uni/a.md") == "---\ntags: [x]\n---\nnew text")
+        let note = try #require(await library.index.notes["Uni/a.md"])
+        #expect(note.snippet == "new text")
+        #expect(note.tags == ["x"])
+        #expect(note.modified > Date(timeIntervalSince1970: 1_000))
+    }
+
+    @Test func saveLeavesNoTemporaryFilesBehind() async throws {
+        let folder = try TemporaryLibrary()
+        try folder.write("a.md", "old")
+        let library = Library(root: folder.root)
+
+        try await library.save("a.md", text: "new")
+
+        let contents = try FileManager.default.contentsOfDirectory(atPath: folder.root.path)
+        #expect(contents == ["a.md"])
+    }
+
+    @Test func readingAMissingNoteThrows() async throws {
+        let library = Library(root: try TemporaryLibrary().root)
+        await #expect(throws: (any Error).self) { try await library.read("missing.md") }
+    }
+}

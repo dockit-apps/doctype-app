@@ -1,15 +1,16 @@
-// App entry point: owns the AppModel and declares the single main window.
+// App entry point: declares the single main window. The AppModel lives in the
+// AppDelegate so quit handling can save through it.
 
 import SwiftUI
 
 @main
 struct DocTypeApp: App {
-    @State private var model = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
         Window("DocType", id: "main") {
             MainView()
-                .environment(model)
+                .environment(appDelegate.model)
         }
     }
 }

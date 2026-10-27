@@ -30,6 +30,27 @@ public actor Library {
         index = LibraryIndex(notes: result.notes, folders: result.folders)
         continuation.yield(index)
     }
+
+    /// The full text of a note, frontmatter included.
+    public func read(_ path: String) throws -> String {
+        assertNotOnMainThread()
+        return try String(contentsOf: url(for: path), encoding: .utf8)
+    }
+
+    /// Writes a note atomically (temp file + rename, so a crash never leaves
+    /// half a note), then refreshes its index entry from the saved text.
+    public func save(_ path: String, text: String) throws {
+        assertNotOnMainThread()
+        let fileURL = url(for: path)
+        try Data(text.utf8).write(to: fileURL, options: .atomic)
+        let modified = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        index.update(NoteSummary.make(path: path, text: text, modified: modified ?? Date()))
+        continuation.yield(index)
+    }
+
+    private func url(for path: String) -> URL {
+        root.appending(path: path, directoryHint: .notDirectory)
+    }
 }
 
 /// Debug guard for the "no file I/O on the main thread" rule.

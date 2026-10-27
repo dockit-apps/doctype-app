@@ -39,9 +39,10 @@ struct MainView: View {
                 Button("Choose Library…") { isChoosingLibrary = true }
                     .buttonStyle(.glassProminent)
             }
-        } else if let note = model.selectedNote {
-            // Replaced by the editor in Phase 2.
-            ContentUnavailableView(note.title, systemImage: "doc.text", description: Text(note.path))
+        } else if let path = model.selectedNotePath {
+            EditorView(controller: model.editor)
+                .navigationTitle(((path as NSString).lastPathComponent as NSString).deletingPathExtension)
+                .task(id: path) { await model.openSelectedNote() }
         } else {
             ContentUnavailableView("No Note Selected", systemImage: "square.and.pencil")
         }

@@ -21,6 +21,11 @@ public struct LibraryIndex: Sendable {
         self.notebooks = Notebook.tree(from: folders)
     }
 
+    /// Inserts or replaces one note's summary.
+    mutating func update(_ note: NoteSummary) {
+        notes[note.path] = note
+    }
+
     /// Notes matching `filter`, most recently modified first.
     public func notes(matching filter: Filter) -> [NoteSummary] {
         notes.values
