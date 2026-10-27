@@ -16,6 +16,9 @@ public struct TextEdit: Equatable, Sendable {
         self.selectionAfter = selectionAfter
     }
 
+    /// True for an edit that only keeps the selection (a key that should do nothing).
+    public var isNoChange: Bool { range.length == 0 && replacement.isEmpty }
+
     /// Applies the edit to a copy of `text` (for tests and headless use).
     public func applied(to text: String) -> String {
         (text as NSString).replacingCharacters(in: range, with: replacement)
