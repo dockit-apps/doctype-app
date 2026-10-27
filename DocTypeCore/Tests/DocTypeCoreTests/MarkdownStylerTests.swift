@@ -136,7 +136,8 @@ struct IncrementalStylingTests {
     func restylingOnlyTheDirtyRangeMatchesFullStyling(seed: UInt64) {
         var random = SplitMix(seed: seed)
         let pieces = ["# ", "## Heading\n", "**", "\n", "\n\n", "```\n", "```swift\n", "> ", "---\n", "    ",
-                      "text ", "===\n", "- [ ] ", "ğ", "🎓"]
+                      "text ", "===\n", "- [ ] ", "ğ", "🎓", "`", "_", "~~", "[link](u)", "- ", "1. ", "- [x] ",
+                      "| a | b |\n|---|---|\n"]
         let document = NSMutableAttributedString(attributedString: Self.fullyStyled("# Start\n\nSome text.\n"))
         var map = BlockMap(text: document.mutableString)
 

@@ -20,6 +20,24 @@ public enum Style: Hashable, Sendable {
     case blockquote
     /// A `---` line, drawn as a horizontal rule.
     case horizontalRule
+
+    // Inline
+    case strong
+    case emphasis
+    case strikethrough
+    case inlineCode
+    /// A link's visible text (its URL syntax is a marker).
+    case link
+
+    // Lists
+    /// "-", "*" or "+" of a list item: keeps its width but is drawn as a bullet.
+    case listBullet
+    /// "1." or "1)" of an ordered list item: stays visible, dimmed.
+    case listNumber
+    /// "[ ]" or "[x]" of a task: keeps its width but is drawn as a checkbox.
+    case taskBox(checked: Bool)
+    /// The text of a completed task.
+    case completedTask
 }
 
 /// Kinds of code tokens the editor colors.
