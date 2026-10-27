@@ -108,3 +108,11 @@ struct InlineStylingTests {
         #expect(markers.allSatisfy { $0.revealRange == nil })
     }
 }
+
+/// cmark-gfm can report a table cell column that falls inside a multi-byte
+/// character; styling must not crash (found by the incremental property test).
+@Test func tableWithMultiByteCharactersDoesNotCrash() {
+    let text = " `| a> | b|- ## | a | b \n|--- [x] -|---|\nHeading\nx]- ] ğ\n-- tex###  H `~~#-     --|\n`|b [ ] \n---`\n__t`enk`ğ*~-\n--|``\n\n" as NSString
+    let spans = MarkdownStyler.spans(in: text, blocks: BlockMap(text: text).blocks)
+    #expect(spans.allSatisfy { NSMaxRange($0.range) <= text.length })
+}

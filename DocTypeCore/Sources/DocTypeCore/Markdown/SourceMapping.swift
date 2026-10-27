@@ -34,12 +34,18 @@ struct SourceMapping {
         }
     }
 
-    /// UTF-16 offset of a source location, clamped to the text.
+    /// UTF-16 offset of a source location, clamped to the text. Never traps: a
+    /// column past the end of the text, or one that falls inside a multi-byte
+    /// character, is rounded down to the nearest valid position.
     func utf16Offset(of location: SourceLocation) -> Int {
         let line = min(max(location.line - 1, 0), lineStarts.count - 1)
         let start = lineStarts[line]
         let utf8 = text.utf8
-        let target = utf8.index(start.index, offsetBy: location.column - 1, limitedBy: utf8.endIndex) ?? utf8.endIndex
+        var target = utf8.index(start.index, offsetBy: max(location.column - 1, 0), limitedBy: utf8.endIndex)
+            ?? utf8.endIndex
+        while target > start.index, target.samePosition(in: text.unicodeScalars) == nil {
+            target = utf8.index(before: target)
+        }
         return start.utf16Offset + text.utf16.distance(from: start.index, to: target)
     }
 
