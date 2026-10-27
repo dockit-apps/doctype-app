@@ -68,21 +68,45 @@ public struct Frontmatter: Equatable, Sendable {
 
         let items: [Substring]
         if value.hasPrefix("[") {
-            items = value.dropFirst().prefix { $0 != "]" }.split(separator: ",")
+            items = splitOutsideQuotes(value.dropFirst().prefix { $0 != "]" })
         } else if value.isEmpty {
             items = lines[(keyLine + 1)...]
                 .map { $0.drop { $0 == " " || $0 == "\t" } }
                 .prefix { $0.hasPrefix("- ") || $0 == "-" }
                 .map { $0.dropFirst() }
         } else {
-            items = value[...].split(separator: ",")
+            items = splitOutsideQuotes(value[...])
         }
         return items.map(unquote).filter { !$0.isEmpty }
     }
 
+    /// Splits `a, "b, c", 'd'` at the commas that aren't inside quotes.
+    private static func splitOutsideQuotes(_ value: Substring) -> [Substring] {
+        var items: [Substring] = []
+        var start = value.startIndex, quote: Character?, escaped = false
+        for index in value.indices {
+            let character = value[index]
+            if escaped { escaped = false; continue }
+            if let open = quote {
+                if character == "\\", open == "\"" { escaped = true } else if character == open { quote = nil }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "," {
+                items.append(value[start..<index])
+                start = value.index(after: index)
+            }
+        }
+        items.append(value[start...])
+        return items
+    }
+
     private static func unquote(_ item: Substring) -> String {
         let trimmed = item.trimmingCharacters(in: .whitespaces)
-        for quote in ["\"", "'"] where trimmed.count >= 2 && trimmed.hasPrefix(quote) && trimmed.hasSuffix(quote) {
+        if trimmed.count >= 2, trimmed.hasPrefix("\""), trimmed.hasSuffix("\"") {
+            return String(trimmed.dropFirst().dropLast())
+                .replacingOccurrences(of: "\\\"", with: "\"").replacingOccurrences(of: "\\\\", with: "\\")
+        }
+        if trimmed.count >= 2, trimmed.hasPrefix("'"), trimmed.hasSuffix("'") {
             return String(trimmed.dropFirst().dropLast())
         }
         return trimmed

@@ -31,6 +31,24 @@ public struct LibraryIndex: Sendable {
         notes[path] = nil
     }
 
+    /// Every tag in the library with how many notes have it, sorted by name.
+    /// Tags differing only in case count as one, shown in their most used spelling.
+    public func tagCounts() -> [TagCount] {
+        var spellings: [String: [String: Int]] = [:]  // lowercased → spelling → notes
+        for note in notes.values {
+            for tag in Set(note.tags) {
+                spellings[tag.lowercased(), default: [:]][tag, default: 0] += 1
+            }
+        }
+        return spellings.values.map { variants in
+            let name = variants.max { lhs, rhs in
+                lhs.value != rhs.value ? lhs.value < rhs.value : lhs.key > rhs.key
+            }!.key
+            return TagCount(name: name, count: variants.values.reduce(0, +))
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     /// Notes matching `filter`, most recently modified first.
     public func notes(matching filter: Filter) -> [NoteSummary] {
         notes.values
@@ -40,6 +58,11 @@ public struct LibraryIndex: Sendable {
                     : lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
             }
     }
+}
+
+public struct TagCount: Hashable, Sendable {
+    public let name: String
+    public let count: Int
 }
 
 public struct Notebook: Identifiable, Hashable, Sendable {

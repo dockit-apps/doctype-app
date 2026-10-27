@@ -23,9 +23,9 @@ extension Library {
 
     /// Creates an empty note in `folder` (`""` = library root), named `title`
     /// or `title 2`, `title 3`, … if taken. Returns the new note's path.
-    public func createNote(in folder: String, title: String = "Untitled") throws -> String {
+    public func createNote(in folder: String, title: String = "Untitled", tags: [String] = []) throws -> String {
         let path = FileNaming.availablePath(name: title, extension: "md", in: folder, exists: exists)
-        try save(path, text: "")
+        try save(path, text: Frontmatter.settingTags(tags, in: nil))
         return path
     }
 
