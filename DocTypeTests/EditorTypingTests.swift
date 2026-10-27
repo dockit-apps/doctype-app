@@ -462,4 +462,94 @@ struct EditorTypingTests {
         #expect(await editor.open("Long.md"))
         #expect(editor.textView.string == long)
     }
+
+    // MARK: Format commands and code fences
+
+    @Test func formatCommandsChangeTheTextInOneUndoStepEach() async throws {
+        let (editor, folder) = try await editor(showing: "Title\n\nsome words here")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        editor.format { Formatting.heading(1, in: $0, selection: $1) }
+        #expect(textView.string == "# Title\n\nsome words here")
+        #expect(font(at: 3, in: textView)?.pointSize == 26)
+
+        textView.undoManager?.undo()  // each command is one undo step (one per event in the app)
+        #expect(textView.string == "Title\n\nsome words here")
+
+        textView.setSelectedRange(NSRange(location: 13, length: 0))  // in "words"
+        editor.format { Formatting.toggle(.strong, in: $0, selection: $1) }
+        #expect(textView.string == "Title\n\nsome **words** here")
+        #expect(textView.selectedRange() == NSRange(location: 15, length: 0))
+    }
+
+    @Test func returnAfterAnOpeningFenceAddsTheClosingFence() async throws {
+        let (editor, folder) = try await editor(showing: "Intro\n\n\n\nAfter")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        textView.setSelectedRange(NSRange(location: 7, length: 0))  // the empty line between
+
+        type("```swift", in: textView)
+        press(#selector(NSResponder.insertNewline(_:)), in: textView)
+        type("let a = 1", in: textView)
+
+        #expect(textView.string == "Intro\n\n```swift\nlet a = 1\n```\n\nAfter")
+        let after = (textView.string as NSString).range(of: "After").location
+        #expect(font(at: after, in: textView)?.isFixedPitch == false)  // the text below isn't code
+    }
+
+    /// Replace All the way NSTextFinder does it: every match replaced in one
+    /// editing pass. Must be one undo step and fast in a 5,000-line note.
+    @Test func replaceAllInABigNoteIsOneUndoStepAndFast() async throws {
+        let line = "Section text with foo and more foo words, a [link](https://x.org) and `code`.\n"
+        let (editor, folder) = try await editor(showing: String(repeating: line, count: 5_000))
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        let storage = try #require(textView.textStorage)
+        let string = storage.string as NSString
+        var matches: [NSValue] = []
+        var searchRange = NSRange(location: 0, length: string.length)
+        while true {
+            let found = string.range(of: "foo", range: searchRange)
+            guard found.location != NSNotFound else { break }
+            matches.append(NSValue(range: found))
+            searchRange = NSRange(location: NSMaxRange(found), length: string.length - NSMaxRange(found))
+        }
+        #expect(matches.count == 10_000)
+
+        let clock = ContinuousClock()
+        let elapsed = clock.measure {
+            guard textView.shouldChangeText(inRanges: matches, replacementStrings: Array(repeating: "bar", count: matches.count))
+            else { return }
+            storage.beginEditing()
+            for match in matches.reversed() { storage.replaceCharacters(in: match.rangeValue, with: "bar") }
+            storage.endEditing()
+            textView.didChangeText()
+        }
+        print("Replace All of 10,000 matches: \(elapsed)")
+        #expect(!textView.string.contains("foo"))
+        #expect(elapsed < .seconds(1))  // debug build; release is several times faster
+
+        textView.undoManager?.undo()
+        #expect(textView.string == String(repeating: line, count: 5_000))
+    }
+
+    @Test func findShowsTheFindBar() async throws {
+        let (editor, folder) = try await editor(showing: "one two one")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+
+        editor.performFind(.showFindInterface)
+
+        #expect(editor.scrollView.isFindBarVisible)
+    }
 }

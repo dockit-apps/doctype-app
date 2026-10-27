@@ -22,7 +22,8 @@ extension EditorController {
         let selection = textView.selectedRange()
         let edit: TextEdit? = switch selector {
         case #selector(NSResponder.insertNewline(_:)):
-            ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+            CodeFenceEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+                ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.deleteBackward(_:)):
             ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
@@ -37,6 +38,20 @@ extension EditorController {
         guard let edit else { return false }
         apply(edit)
         return true
+    }
+
+    /// Runs a Format menu transform (core `Formatting`) on the text and selection.
+    func format(_ transform: (NSString, NSRange) -> TextEdit) {
+        guard let text = textView.textStorage?.mutableString else { return }
+        apply(transform(text, textView.selectedRange()))
+    }
+
+    /// Shows the find or replace bar, or jumps to the next or previous match.
+    func performFind(_ action: NSTextFinder.Action) {
+        focusText()
+        let sender = NSMenuItem()
+        sender.tag = action.rawValue
+        textView.performTextFinderAction(sender)
     }
 
     /// Checks or unchecks the task whose box starts at `boxLocation` (one undo step).
