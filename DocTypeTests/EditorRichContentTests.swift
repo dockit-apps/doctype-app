@@ -478,6 +478,41 @@ struct EditorRichContentTests {
         _ = window
     }
 
+    /// The report: ↑ from the first column's first row landed in the second
+    /// column's header, and ↓ then switched columns. Also Option-Return, which
+    /// put a real line break into the row and broke the table.
+    @Test func upAndDownStayInTheirColumnAndLineBreaksStayInTheCell() async throws {
+        let text = "| test | Column 2 |\n| --- | --- |\n|  |  |\n| afs |  |\n|  |  |"
+        let (editor, folder, _) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let string = text as NSString
+        func column() -> Int? {
+            TableEditing.table(at: textView.selectedRange().location, in: string, blockMap: editor.styler.blockMap)?
+                .position(of: textView.selectedRange().location)?.column
+        }
+
+        textView.setSelectedRange(NSRange(location: string.range(of: "|  |  |").location + 2, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
+        #expect(textView.selectedRange().location == string.range(of: "test").location)  // first column's header
+        textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        #expect(textView.selectedRange().location == string.range(of: "afs").location)
+        #expect(column() == 0)
+
+        textView.setSelectedRange(NSRange(location: string.range(of: "Column 2").upperBound, length: 0))
+        for _ in 0..<3 {
+            textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+            #expect(column() == 1)
+        }
+
+        textView.setSelectedRange(NSRange(location: string.range(of: "afs").upperBound, length: 0))
+        textView.doCommand(by: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
+        textView.insertText("x", replacementRange: textView.selectedRange())
+        #expect(textView.string.contains("| afs<br>x |  |\n"))
+        #expect(editor.isInTable(at: textView.selectedRange().location))
+    }
+
     /// A table at the very end of a note: its last row's "+" button is below
     /// the text, where TextKit leaves no room of its own.
     @Test func theAddRowButtonWorksAtTheEndOfANote() async throws {

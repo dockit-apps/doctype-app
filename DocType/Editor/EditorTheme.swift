@@ -112,6 +112,8 @@ enum EditorTheme {
         case .listBullet:
             // Keeps its width; BlockDecorations draws a bullet there.
             [.foregroundColor: NSColor.clear, bulletKey: true]
+        case .lineBreak:
+            [.foregroundColor: NSColor.tertiaryLabelColor]
         case .listNumber, .completedTask:
             [.foregroundColor: NSColor.secondaryLabelColor]
         case .taskBox(let checked):

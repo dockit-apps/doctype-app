@@ -54,6 +54,9 @@ public enum Style: Hashable, Sendable {
     case tableRow(index: Int, isLast: Bool)
     /// A table's "|": invisible, because the grid is drawn there, but it keeps its width.
     case tablePipe
+    /// `<br>` in a table cell: the line break a row (one line of text) can't
+    /// hold otherwise, as on GitHub. Shown dimmed.
+    case lineBreak
 }
 
 /// How a table column's cells sit in it, from the `:---:` delimiter row.

@@ -23,16 +23,30 @@ extension EditorController {
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         guard !textView.hasMarkedText(), let text = textView.textStorage?.mutableString else { return false }
         let selection = textView.selectedRange()
+        let newline = {
+            CodeFenceEditing.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
+                ?? TableEditing.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
+                ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
+                ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
+        }
         let edit: TextEdit? = switch selector {
+        case #selector(NSResponder.insertNewline(_:)) where NSApp.currentEvent?.modifierFlags.contains(.shift) == true:
+            // Shift-Return: a line break inside a table cell; elsewhere a normal Return.
+            TableEditing.editForLineBreak(in: text, selection: selection, blockMap: styler.blockMap) ?? newline()
+        case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            // Option-Return: the same in a cell; elsewhere a plain line break.
+            TableEditing.editForLineBreak(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertNewline(_:)):
-            CodeFenceEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
-                ?? TableEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
-                ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
-                ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+            newline()
         case #selector(NSResponder.deleteBackward(_:)):
             TableEditing.editForDelete(forward: false, in: text, selection: selection, blockMap: styler.blockMap)
                 ?? ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+        case #selector(NSResponder.moveUp(_:)), #selector(NSResponder.moveDown(_:)):
+            TableEditing.caretForVerticalMove(up: selector == #selector(NSResponder.moveUp(_:)), in: text,
+                                              selection: selection, blockMap: styler.blockMap)
+                .map { TextEdit(range: NSRange(location: selection.location, length: 0), replacement: "",
+                                selectionAfter: NSRange(location: $0, length: 0)) }
         case #selector(NSResponder.deleteForward(_:)):
             TableEditing.editForDelete(forward: true, in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertTab(_:)):

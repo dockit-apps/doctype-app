@@ -214,3 +214,52 @@ struct TableEditingTests {
                                            blockMap: BlockMap(text: plain)) == nil)  // not a table
     }
 }
+
+struct TableNavigationTests {
+    private let text = "| test | Column 2 |\n| --- | --- |\n|  |  |\n| afs |  |\n|  |  |" as NSString
+
+    private func move(up: Bool, from location: Int) -> Int? {
+        TableEditing.caretForVerticalMove(up: up, in: text, selection: NSRange(location: location, length: 0),
+                                          blockMap: BlockMap(text: text))
+    }
+
+    /// The report: up from the first body row went to the other column's
+    /// header, and the next down jumped back to the first column.
+    @Test func upAndDownStayInTheColumn() {
+        let firstBodyColumn1 = text.range(of: "|  |  |").location + 2   // after "| "
+        let header1End = text.range(of: "test").upperBound
+        #expect(move(up: true, from: firstBodyColumn1) == text.range(of: "test").location)
+        #expect(move(up: false, from: header1End) == firstBodyColumn1)  // past the hidden row
+        let afs = text.range(of: "afs")
+        #expect(move(up: false, from: firstBodyColumn1) == afs.location)
+        #expect(move(up: true, from: afs.upperBound) == firstBodyColumn1)  // an empty cell: its start
+        // The place in the text is kept where it fits.
+        #expect(move(up: true, from: afs.location + 2) == firstBodyColumn1)
+        #expect(move(up: false, from: text.range(of: "test").location + 2) == firstBodyColumn1)
+        // Column 2 stays column 2.
+        let column2 = text.range(of: "Column 2")
+        let body2 = move(up: false, from: column2.location)!
+        #expect(TableEditing.table(at: body2, in: text, blockMap: BlockMap(text: text))?.position(of: body2)?.column == 1)
+    }
+
+    @Test func aboveTheHeaderAndBelowTheLastRowTheCursorLeaves() {
+        #expect(move(up: true, from: 3) == nil)
+        #expect(move(up: false, from: text.length - 2) == nil)
+        #expect(move(up: true, from: 0) == nil)  // on the pipe: still the header row
+    }
+
+    @Test func shiftReturnInACellWritesABreak() {
+        let location = text.range(of: "afs").upperBound
+        let edit = TableEditing.editForLineBreak(in: text, selection: NSRange(location: location, length: 0),
+                                                 blockMap: BlockMap(text: text))
+        #expect(edit.map { $0.applied(to: text as String) }?.contains("| afs<br> |") == true)
+        #expect(edit?.selectionAfter == NSRange(location: location + 4, length: 0))
+        let plain = "a line" as NSString
+        #expect(TableEditing.editForLineBreak(in: plain, selection: NSRange(location: 2, length: 0),
+                                              blockMap: BlockMap(text: plain)) == nil)
+        // Shown dimmed, as a line break.
+        let cell = "| a<br>b |\n|---|" as NSString
+        #expect(MarkdownStyler.spans(in: cell, blocks: BlockMap(text: cell).blocks)
+            .contains { $0.style == .lineBreak && cell.substring(with: $0.range) == "<br>" })
+    }
+}

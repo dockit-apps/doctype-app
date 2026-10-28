@@ -276,6 +276,35 @@ public enum TableEditing {
         return moveSelection(from: selection, to: contentRange(of: target, in: text))
     }
 
+    /// ↑ / ↓ in a table: the same column one row up or down, skipping the hidden
+    /// `|---|` row, at the same place in the cell's text where it fits. Nil
+    /// outside tables, above the header and below the last row (the cursor
+    /// then leaves the table as usual). Moving by x position instead, as text
+    /// views do, drifted between columns: the hidden row has no width to aim at.
+    public static func caretForVerticalMove(up: Bool, in text: NSString, selection: NSRange, blockMap: BlockMap) -> Int? {
+        guard selection.length == 0, let table = table(at: selection.location, in: text, blockMap: blockMap),
+              let (row, column) = table.position(of: selection.location), row != 1 else { return nil }
+        let target = up ? (row == 2 ? 0 : row - 1) : (row == 0 ? 2 : row + 1)
+        guard target >= 0, target < table.lines.count, column < table.cells[row].count else { return nil }
+        let from = contentRange(of: table.cells[row][column], in: text)
+        let offset = min(max(selection.location - from.location, 0), from.length)
+        let cells = table.cells[target]
+        guard !cells.isEmpty else { return table.lines[target].location }
+        let to = contentRange(of: cells[min(column, cells.count - 1)], in: text)
+        return to.location + min(offset, to.length)
+    }
+
+    /// Shift-Return or Option-Return in a cell: a line break, written `<br>` as
+    /// on GitHub, since a real one would end the row. Nil outside tables.
+    public static func editForLineBreak(in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
+        let line = lineContaining(selection.location, in: text)
+        guard selection.upperBound <= line.upperBound,
+              let table = table(at: selection.location, in: text, blockMap: blockMap),
+              let (row, _) = table.position(of: selection.location), row != 1 else { return nil }
+        return TextEdit(range: selection, replacement: "<br>",
+                        selectionAfter: NSRange(location: selection.location + 4, length: 0))
+    }
+
     /// Return in a table row: the same column one row down, adding a row at the
     /// end; on an empty last row, removes it and leaves the table. Also with a
     /// cell's text selected (as Tab leaves it), like in a spreadsheet.

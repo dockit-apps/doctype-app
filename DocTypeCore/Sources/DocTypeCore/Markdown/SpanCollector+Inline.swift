@@ -104,6 +104,14 @@ extension SpanCollector {
         }
     }
 
+    /// `<br>` (also `<br/>`, `<br />`), the way to break a line in a table cell.
+    mutating func visitInlineHTML(_ html: InlineHTML) {
+        guard let range = localRange(html),
+              html.rawHTML.range(of: #"^<br\s*/?>$"#, options: [.regularExpression, .caseInsensitive]) != nil
+        else { return }
+        inline(range, .lineBreak)
+    }
+
     // MARK: - Lists
 
     mutating func visitListItem(_ listItem: ListItem) {
