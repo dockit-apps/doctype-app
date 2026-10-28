@@ -172,8 +172,11 @@ public actor Library {
     }
 
     /// Anything inside a dot-folder (.git, .obsidian) or a dotfile.
+    /// Inside a hidden folder or an attachments folder: not part of the library's notes.
     private static func isHidden(_ path: String) -> Bool {
-        path.split(separator: "/").contains { $0.hasPrefix(".") }
+        path.split(separator: "/").contains {
+            $0.hasPrefix(".") || $0.caseInsensitiveCompare(attachmentsFolderName) == .orderedSame
+        }
     }
 }
 

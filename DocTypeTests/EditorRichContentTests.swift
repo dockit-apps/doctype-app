@@ -201,4 +201,109 @@ struct EditorRichContentTests {
         #expect(thumbnail?.width == 512)
         #expect(thumbnail?.height == 256)
     }
+
+    // MARK: Attachments
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<100 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    @Test func pastingAScreenshotSavesItIntoTheNotebooksAttachments() async throws {
+        let (editor, folder, _) = try await editor(showing: "Before\n")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("DocTypeTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setData(png(width: 90, height: 60), forType: .png)
+
+        textView.setSelectedRange(NSRange(location: 7, length: 0))
+        #expect(textView.pasteAttachments(from: pasteboard))
+        try await waitUntil { textView.string.contains("![") }
+
+        let inserted = try #require(textView.string.components(separatedBy: "\n").last)
+        #expect(inserted.hasPrefix("![Pasted image "))
+        #expect(inserted.contains("](attachments/Pasted%20image%20"))
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.appending(path: "attachments").path)
+        #expect(files.count == 1 && files[0].hasPrefix("Pasted image ") && files[0].hasSuffix(".png"))
+        try await waitUntil { image(at: 7, in: textView) != nil }
+        #expect(image(at: 7, in: textView)?.size == CGSize(width: 90, height: 60))
+        #expect(textView.undoManager?.canUndo == true)
+    }
+
+    @Test func pastedFilesAreCopiedImagesOnTheirOwnLineOthersInline() async throws {
+        let (editor, folder, _) = try await editor(showing: "See  here")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        let outside = FileManager.default.temporaryDirectory.appending(path: "DocTypeOutside-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try png(width: 40, height: 40).write(to: outside.appending(path: "Graph.png"))
+        try Data("%PDF".utf8).write(to: outside.appending(path: "Week 3.pdf"))
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("DocTypeTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+
+        pasteboard.clearContents()
+        pasteboard.writeObjects([outside.appending(path: "Week 3.pdf") as NSURL])
+        textView.setSelectedRange(NSRange(location: 4, length: 0))
+        #expect(textView.pasteAttachments(from: pasteboard))
+        try await waitUntil { textView.string.contains("pdf") }
+        #expect(textView.string == "See [Week 3](attachments/Week%203.pdf) here")
+
+        pasteboard.clearContents()
+        pasteboard.writeObjects([outside.appending(path: "Graph.png") as NSURL])
+        textView.setSelectedRange(NSRange(location: 3, length: 0))  // in the middle of the line
+        #expect(textView.pasteAttachments(from: pasteboard))
+        try await waitUntil { textView.string.contains("png") }
+        #expect(textView.string == "See\n![Graph](attachments/Graph.png)\n [Week 3](attachments/Week%203.pdf) here")
+        #expect(FileManager.default.fileExists(atPath: folder.appending(path: "attachments/Graph.png").path))
+
+        pasteboard.clearContents()
+        pasteboard.setString("just text", forType: .string)
+        #expect(!textView.pasteAttachments(from: pasteboard))
+    }
+
+    // MARK: Resizing with the mouse
+
+    private func mouse(_ type: NSEvent.EventType, at point: NSPoint, in textView: NSTextView, clicks: Int = 1) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: textView.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+                           windowNumber: textView.window!.windowNumber, context: nil, eventNumber: 0,
+                           clickCount: clicks, pressure: 1)!
+    }
+
+    @Test func draggingTheHandleWithTheMouseResizesLive() async throws {
+        let text = "![Pic](pic.png)\n\nend"
+        let (editor, folder, _) = try await editor(showing: text, files: ["pic.png": png(width: 800, height: 400)])
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        let origin = textView.textContainerOrigin
+        func imageFrame() throws -> CGRect {
+            layOut(textView)
+            return try #require(textView.imageHit(at: NSPoint(x: origin.x + 50, y: origin.y + 60))).frame
+        }
+
+        // A click on the picture selects it (shows the handle).
+        let frame = try imageFrame()
+        try #require(textView.imageHit(at: NSPoint(x: frame.midX, y: frame.midY)) != nil)
+        textView.mouseDown(with: mouse(.leftMouseDown, at: NSPoint(x: frame.midX, y: frame.midY), in: textView))
+        #expect(image(at: 0, in: textView)?.isSelected == true)
+
+        // Drag the corner handle 100 points left, in steps: the image follows.
+        // (Never send a press the view would pass to NSTextView: its tracking loop
+        // waits for a real mouse-up and would hang the test.)
+        layOut(textView)
+        let handle = NSPoint(x: frame.maxX, y: frame.maxY)
+        try #require(textView.imageHit(at: handle)?.image.isSelected == true)
+        textView.mouseDown(with: mouse(.leftMouseDown, at: handle, in: textView))
+        for step in 1...4 {
+            textView.mouseDragged(with: mouse(.leftMouseDragged, at: NSPoint(x: handle.x - CGFloat(step * 25), y: handle.y), in: textView))
+            #expect(image(at: 0, in: textView)?.size.width == 400 - CGFloat(step * 25))
+        }
+        #expect(textView.string == text)
+        #expect(try imageFrame().width == 300)  // the layout follows too
+
+        textView.mouseUp(with: mouse(.leftMouseUp, at: NSPoint(x: handle.x - 100, y: handle.y), in: textView))
+        #expect(textView.string == "![Pic|300](pic.png)\n\nend")
+        #expect(image(at: 0, in: textView)?.size == CGSize(width: 300, height: 150))
+    }
 }

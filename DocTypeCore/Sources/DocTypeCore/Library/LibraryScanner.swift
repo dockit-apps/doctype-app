@@ -1,5 +1,5 @@
 // Walks a library folder once and builds a summary for every `.md` note.
-// Hidden folders (.git, .obsidian, …) and packages are skipped.
+// Hidden folders (.git, .obsidian, …), packages and attachments folders are skipped.
 
 import Foundation
 
@@ -25,6 +25,11 @@ enum LibraryScanner {
             let values = try url.resourceValues(forKeys: Set(keys))
             let path = relativePath(of: url, in: root)
             if values.isDirectory == true {
+                // A notebook's attachments folder holds files, not notes.
+                if url.lastPathComponent.caseInsensitiveCompare(Library.attachmentsFolderName) == .orderedSame {
+                    enumerator.skipDescendants()
+                    continue
+                }
                 result.folders.append(path)
             } else if url.pathExtension.lowercased() == "md" {
                 result.notes.append(readSummary(at: url, path: path, modified: values.contentModificationDate))

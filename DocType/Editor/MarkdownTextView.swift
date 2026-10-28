@@ -18,6 +18,9 @@ final class MarkdownTextView: NSTextView {
     /// range and the new width), and once more with `isFinished` on release.
     var onImageResize: (_ range: NSRange, _ width: CGFloat, _ isFinished: Bool) -> Void = { _, _, _ in }
 
+    /// Called with files dropped or pasted into the editor and where they go.
+    var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
+
     /// The image being resized: its syntax, width and where the drag started.
     private var resizing: (range: NSRange, startWidth: CGFloat, startX: CGFloat, width: CGFloat)?
 

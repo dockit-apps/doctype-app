@@ -46,6 +46,7 @@ extension EditorController {
                                                queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.editorWidthChanged() }
         }
+        textView.onAttach = { [weak self] items, location in self?.attach(items, at: location) }
         textView.onImageResize = { [weak self] range, width, isFinished in
             self?.resizeImage(at: range, to: width, isFinished: isFinished)
         }
