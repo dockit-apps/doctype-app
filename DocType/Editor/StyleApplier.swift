@@ -22,6 +22,9 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     private var pendingRange: NSRange?
     /// The text changed and the block map isn't caught up yet.
     var hasPendingEdits: Bool { pendingRange != nil }
+    /// Exactly the characters changed since styles were applied, where
+    /// `pendingRange` has whole blocks: where an undo changed the text.
+    private(set) var pendingEditedRange: NSRange?
     /// The selection the current styles were applied for (markers on its lines are shown).
     private var styledSelection = NSRange(location: 0, length: 0)
     /// How to find the open note's images; nil shows image syntax as text.
@@ -65,6 +68,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         self.blockMap = blockMap
         styledSelection = selection
         pendingRange = nil
+        pendingEditedRange = nil
         isReplacingDocument = true
         defer { isReplacingDocument = false }
         storage.setAttributedString(attributed)
@@ -96,6 +100,8 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         // method is composing), so earlier ranges move with later edits.
         let previous = pendingRange.map { Self.shift($0, by: editedRange, delta: delta) }
         pendingRange = previous.map { NSUnionRange($0, dirty) } ?? dirty
+        let previousEdit = pendingEditedRange.map { Self.shift($0, by: editedRange, delta: delta) }
+        pendingEditedRange = previousEdit.map { NSUnionRange($0, editedRange) } ?? editedRange
         styledSelection = Self.shift(styledSelection, by: editedRange, delta: delta)
     }
 
@@ -105,6 +111,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     func applyPendingStyles(in storage: NSTextStorage) {
         guard let pending = pendingRange, textView?.hasMarkedText() != true else { return }
         pendingRange = nil
+        pendingEditedRange = nil
         let state = DocTypeCore.signposter.beginInterval("Restyle")
         defer { DocTypeCore.signposter.endInterval("Restyle", state) }
 

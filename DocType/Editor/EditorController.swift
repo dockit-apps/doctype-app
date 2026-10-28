@@ -69,6 +69,13 @@ final class EditorController: NSObject, NSTextViewDelegate {
         tableCells = TableCellSession(owner: self)
         setUpImages()
         setUpTables()
+        let center = NotificationCenter.default
+        for name: Notification.Name in [.NSUndoManagerWillUndoChange, .NSUndoManagerWillRedoChange] {
+            center.addObserver(self, selector: #selector(noteWillUndoOrRedo(_:)), name: name, object: nil)
+        }
+        for name: Notification.Name in [.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
+            center.addObserver(self, selector: #selector(noteDidUndoOrRedo(_:)), name: name, object: nil)
+        }
     }
 
     /// Called when a table cell's editor gains or loses keyboard focus.
@@ -315,6 +322,28 @@ final class EditorController: NSObject, NSTextViewDelegate {
         if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
         updateIsInTable()
         moveCursorOutOfTables()
+    }
+
+    // MARK: - Undo
+
+    /// An undo or redo may change any part of the note (a table cell's typing,
+    /// another cell, a row), so a cell being edited closes first; the cell the
+    /// change is in opens once the cursor lands there (moveCursorOutOfTables).
+    @objc private func noteWillUndoOrRedo(_ notification: Notification) {
+        guard let undoManager = textView.undoManager, notification.object as? UndoManager === undoManager else { return }
+        tableCells.end(placingCursorAt: nil)
+    }
+
+    /// NSTextView undoes and redoes an edit made in code (`apply`) without
+    /// telling its delegate: no textDidChange, and the cursor stays where it
+    /// was. So a change an undo or redo leaves unfinished is finished like any
+    /// edit: restyled and saved, with the cursor at its end (where it's in a
+    /// table, that cell opens). Undoing typing tells the delegate as usual.
+    @objc private func noteDidUndoOrRedo(_ notification: Notification) {
+        guard let undoManager = textView.undoManager, notification.object as? UndoManager === undoManager,
+              let edited = styler.pendingEditedRange else { return }
+        textView.didChangeText()
+        textView.setSelectedRange(NSRange(location: min(NSMaxRange(edited), (textView.string as NSString).length), length: 0))
     }
 
     func scheduleAutosave() {

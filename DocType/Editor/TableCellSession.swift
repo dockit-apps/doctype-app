@@ -4,9 +4,13 @@
 // grows and shrinks with the text, and keys at a cell's edge move to the next
 // cell (TableEditing.target).
 //
-// Undo: while in a cell, ⌘Z undoes typing in it step by step (the editor's own
-// undo manager); once you leave the cell, its whole edit is one step of the
-// note's undo. The note's text is changed without undo while you type.
+// Undo: there's one history, the note's. Typing in a cell is a step of it
+// like typing in the note (key presses in a row at one spot are one step; a
+// paste or a Format command is its own), so ⌘Z, in a cell or not, goes back
+// through everything in order: this cell, other cells, rows that Return added,
+// text outside the table. An undo or redo first closes the cell (see
+// EditorController.noteWillUndoOrRedo); the cursor then lands where the change
+// is, which opens that cell.
 // The note's own text view never keeps its cursor in a table: arriving there
 // (arrow keys, a click, undo) opens the cell instead (see EditorController+Tables).
 
@@ -15,7 +19,6 @@ import DocTypeCore
 
 final class TableCellSession: NSObject, NSTextViewDelegate {
     let editor = TableCellEditor.make()
-    private let cellUndoManager = UndoManager()
     private unowned let owner: EditorController
 
     /// The cell being edited.
@@ -26,12 +29,28 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         /// The cell's text in the note now, without the spaces around it.
         var contentRange: NSRange
         var text: TableCellText
-        /// Its markdown when editing began, for the note's undo.
-        let originalMarkdown: String
         let isHeader: Bool
         let alignment: TableAlignment
     }
     private var cell: EditingCell?
+
+    /// Typing in the cell that one ⌘Z undoes (a step of the note's undo).
+    private final class TypingStep {
+        /// The cell's markdown before it.
+        let original: String
+        /// Where the cell's markdown is in the note now.
+        var range: NSRange
+        /// Where the last change ended in the editor: typing there continues the step.
+        var end = 0
+
+        init(original: String, range: NSRange) {
+            self.original = original
+            self.range = range
+        }
+    }
+    private var typingStep: TypingStep?
+    /// The change being made: does it continue `typingStep`, and where does it end.
+    private var pendingChange: (continuesTyping: Bool, end: Int)?
 
     var isEditing: Bool { cell != nil }
     /// Where the cell being edited starts in the note.
@@ -64,7 +83,7 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
     // MARK: - Opening and closing a cell
 
     /// Starts editing the cell containing `location` (finishing the one being
-    /// edited, as one undo step). Returns false outside a table.
+    /// edited). Returns false outside a table.
     @discardableResult
     func begin(cellAt location: Int, placing placement: Placement) -> Bool {
         guard let storage = textView.textStorage else { return false }
@@ -84,10 +103,9 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         let content = TableEditing.contentRange(of: cellRange, in: text)
         let markdown = text.substring(with: content)
         let cellText = TableCellText(markdown: markdown)
-        cell = EditingCell(location: cellRange.location, contentRange: content, text: cellText, originalMarkdown: markdown,
+        cell = EditingCell(location: cellRange.location, contentRange: content, text: cellText,
                            isHeader: row == 0, alignment: TableEditing.alignment(ofColumn: column, in: table, text: text))
         editor.string = cellText.editorText
-        cellUndoManager.removeAllActions()
         restyleEditor()
         if editor.superview !== textView { textView.addSubview(editor) }
         editor.isHidden = false
@@ -99,21 +117,13 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         return true
     }
 
-    /// Finishes the cell being edited (its edit becomes one undo step of the
-    /// note) and leaves the editor where it is, for another cell.
+    /// Finishes the cell being edited (its text and undo are in the note
+    /// already) and leaves the editor where it is, for another cell.
     func commit() {
-        guard let cell else { return }
-        self.cell = nil
+        guard cell != nil else { return }
+        cell = nil
+        typingStep = nil
         owner.styler.editingTableCell = nil
-        let final = cell.text.markdown
-        if final != cell.originalMarkdown {
-            let range = NSRange(location: cell.contentRange.location, length: (final as NSString).length)
-            let original = cell.originalMarkdown
-            textView.undoManager?.registerUndo(withTarget: owner) { owner in
-                owner.replaceTableCellText(in: range, with: original)
-            }
-            textView.undoManager?.setActionName("Typing")
-        }
     }
 
     /// Stops editing: finishes the cell, hides the editor and gives the note the
@@ -127,10 +137,11 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         hideEditor(restylingAt: cellLocation)
     }
 
-    /// Drops the cell without an undo step (the note's text is being replaced).
+    /// Drops the cell (the note's text is being replaced).
     func cancel() {
         guard cell != nil else { return }
         cell = nil
+        typingStep = nil
         owner.styler.editingTableCell = nil
         if textView.window?.firstResponder === editor { textView.window?.makeFirstResponder(textView) }
         editor.isHidden = true
@@ -200,31 +211,61 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
 
     // MARK: - Typing
 
-    /// Everything typed goes straight into the note, without the note's undo.
+    /// Notes whether this change continues the typing step: a key press right
+    /// where the last one ended (typing on, or deleting back over it).
+    func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+        guard let replacementString else { return true }  // attributes only
+        let continuesTyping = editor.isTyping && typingStep.map { range.location == $0.end || range.upperBound == $0.end } == true
+        pendingChange = (continuesTyping, range.location + (replacementString as NSString).length)
+        return true
+    }
+
+    /// Everything typed goes straight into the note, as a step of the note's
+    /// undo: a new one unless it continues the typing before it.
     func textDidChange(_ notification: Notification) {
+        let change = pendingChange
+        pendingChange = nil
         guard var cell, let storage = textView.textStorage else { return }
         let markdown = TableCellText.markdown(fromEditorText: editor.string)
         cell.text = TableCellText(markdown: markdown)
-        let current = storage.mutableString.substring(with: cell.contentRange)
-        if markdown != current {
+        let previousRange = cell.contentRange
+        let previous = storage.mutableString.substring(with: previousRange)
+        if markdown != previous {
             owner.styler.editingTableCell = (cell.location, editor.textHeight)
             let undo = textView.undoManager
+            var changed = false
             undo?.disableUndoRegistration()
-            if textView.shouldChangeText(in: cell.contentRange, replacementString: markdown) {
-                storage.replaceCharacters(in: cell.contentRange, with: markdown)
+            if textView.shouldChangeText(in: previousRange, replacementString: markdown) {
+                storage.replaceCharacters(in: previousRange, with: markdown)
                 cell.contentRange.length = (markdown as NSString).length
                 self.cell = cell
+                changed = true
                 textView.didChangeText()  // restyles the table and saves, like typing in the note
             }
             undo?.enableUndoRegistration()
+            if changed {
+                if change?.continuesTyping != true || typingStep == nil { startTypingStep(restoring: previous) }
+                typingStep?.range = cell.contentRange
+            }
         }
+        typingStep?.end = change?.end ?? editor.selectedRange().location
+        if !editor.isTyping { typingStep = nil }  // a paste, drop or Format command is a step of its own
         self.cell = cell
         restyleEditor()
         placeEditor()
     }
 
-    /// The editor's own undo, so ⌘Z in a cell undoes typing in it.
-    func undoManager(for view: NSTextView) -> UndoManager? { cellUndoManager }
+    /// Registers a step of the note's undo that puts back the cell's markdown
+    /// as it was (`original`); typing that continues it moves its end.
+    private func startTypingStep(restoring original: String) {
+        guard let cell, let undoManager = textView.undoManager else { return }
+        let step = TypingStep(original: original, range: cell.contentRange)
+        typingStep = step
+        undoManager.registerUndo(withTarget: owner) { owner in
+            owner.replaceTableCellText(in: step.range, with: step.original)
+        }
+        undoManager.setActionName("Typing")
+    }
 
     func textViewDidChangeSelection(_ notification: Notification) {
         restyleEditor()  // markdown markers show on the cursor's line
@@ -289,7 +330,7 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         editor.typingAttributes = typingAttributes
     }
 
-    /// Runs a Format menu transform on the cell's text (one step of its undo).
+    /// Runs a Format menu transform on the cell's text (one undo step).
     func format(_ transform: (NSString, NSRange) -> TextEdit) {
         guard let storage = editor.textStorage else { return }
         let edit = transform(storage.mutableString, editor.selectedRange())

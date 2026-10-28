@@ -1,7 +1,7 @@
 // Tables in a real editor: drawn as a grid (wrapped cells, `<br>` as a line
 // break, rows as tall as their tallest cell), and edited one cell at a time in
-// the cell editor: typing, Shift-Return, the arrow keys, Tab and Return, undo,
-// the "+" buttons and the context menu.
+// the cell editor: typing, Shift-Return, the arrow keys, Tab and Return, undo
+// (one history with the note's), the "+" buttons and the context menu.
 
 import AppKit
 import DocTypeCore
@@ -57,6 +57,31 @@ struct EditorTableTests {
 
     private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0..<100 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    /// The note's undo manager, grouped by hand: each `step` is one group, as
+    /// the run loop makes one for a key press that registers undo (while other
+    /// tests run, the run loop doesn't end its groups in time). A key press
+    /// that must not start a step runs outside any group, where registering
+    /// undo would raise.
+    private func groupUndoByHand(_ editor: EditorController) throws -> UndoManager {
+        let undoManager = try #require(editor.textView.undoManager)
+        #expect(undoManager.groupingLevel == 0)
+        undoManager.groupsByEvent = false
+        return undoManager
+    }
+
+    /// A key press (or command) that is a step of its own in the undo history.
+    private func step(_ undoManager: UndoManager, _ body: () -> Void) {
+        undoManager.beginUndoGrouping()
+        body()
+        undoManager.endUndoGrouping()
+    }
+
+    /// ⌘Z ("undo:") or Shift-⌘Z ("redo:") as the Edit menu sends it: to the
+    /// focused view and up from there (the window handles it).
+    private func press(_ action: String, in window: NSWindow) {
+        #expect(window.firstResponder?.tryToPerform(NSSelectorFromString(action), with: nil) == true)
     }
 
     // MARK: Drawing
@@ -128,25 +153,107 @@ struct EditorTableTests {
         #expect(editor.textView.string.contains("| test a\\|b |  |"))
     }
 
-    @Test func aCellIsOneUndoStepAfterLeavingIt() async throws {
+    // MARK: Undo
+
+    @Test func undoInATableGoesBackThroughEverythingInOrderWithoutLeavingIt() async throws {
         let text = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nafter"
-        let (editor, folder, _) = try await editor(showing: text)
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cells = editor.tableCells!
+        let textView = editor.textView
+        let undoManager = try groupUndoByHand(editor)
+
+        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        step(undoManager) { textView.insertText("!", replacementRange: textView.selectedRange()) }  // in the note
+        #expect(cells.begin(cellAt: cell("2", in: editor), placing: .end))
+        step(undoManager) { type("3", in: editor) }
+        type("4", in: editor)  // typing on: the same step
+        step(undoManager) { #expect(cells.move(.newline)) }  // Return in the last row adds a row
+        step(undoManager) { type("x", in: editor) }
+        let typed = "| A | B |\n| --- | --- |\n| 1 | 234 |\n|  | x |\n\nafter!"
+        #expect(textView.string == typed)
+
+        // Each ⌘Z, still in the table, undoes the last thing done, and the
+        // cell where it was opens.
+        let states = [
+            "| A | B |\n| --- | --- |\n| 1 | 234 |\n|  |  |\n\nafter!",
+            "| A | B |\n| --- | --- |\n| 1 | 234 |\n\nafter!",
+            text + "!",
+        ]
+        for state in states {
+            press("undo:", in: window)
+            #expect(textView.string == state)
+            try await waitUntil { cells.isEditing }
+            #expect(window.firstResponder === cells.editor)
+        }
+        // The cursor is where that typing was: after "2".
+        #expect(cells.cellLocation == cell("2", in: editor))
+        #expect(cells.editor.selectedRange() == NSRange(location: 1, length: 0))
+
+        // One more leaves the table: the note's typing.
+        press("undo:", in: window)
+        #expect(textView.string == text)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!cells.isEditing)
+        #expect(window.firstResponder === textView)
+
+        // Shift-⌘Z redoes it all, in order, opening each change's cell.
+        press("redo:", in: window)
+        #expect(textView.string == text + "!")
+        for state in states.reversed().dropFirst() + [typed] {
+            press("redo:", in: window)
+            #expect(textView.string == state)
+            try await waitUntil { cells.isEditing }
+            #expect(window.firstResponder === cells.editor)
+        }
+        #expect(cells.cellLocation == cell("x", in: editor))
+    }
+
+    @Test func keyPressesInARowAreOneUndoStepAndAFormatCommandIsItsOwn() async throws {
+        let text = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nafter"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cells = editor.tableCells!
+        let undoManager = try groupUndoByHand(editor)
+
+        #expect(cells.begin(cellAt: cell("1", in: editor), placing: .end))
+        step(undoManager) { type("a", in: editor) }
+        type("b", in: editor)
+        cells.editor.doCommand(by: #selector(NSResponder.deleteBackward(_:)))  // the Delete key, back over it
+        cells.editor.setSelectedRange(NSRange(location: 0, length: 0))
+        step(undoManager) { type("z", in: editor) }  // typing somewhere else: a new step
+        step(undoManager) { editor.format { Formatting.toggle(.strong, in: $0, selection: $1) } }  // its own step
+        #expect(editor.textView.string == "| A | B |\n| --- | --- |\n| **z1a** | 2 |\n\nafter")
+
+        for state in ["| z1a | 2 |", "| 1a | 2 |", "| 1 | 2 |"] {
+            press("undo:", in: window)
+            #expect(editor.textView.string == "| A | B |\n| --- | --- |\n\(state)\n\nafter")
+            try await waitUntil { cells.isEditing }
+        }
+    }
+
+    @Test func undoFromOutsideTheTableOpensTheCellWhereTheChangeWas() async throws {
+        let text = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nafter"
+        let (editor, folder, window) = try await editor(showing: text)
         defer { try? FileManager.default.removeItem(at: folder) }
         let cells = editor.tableCells!
         #expect(cells.begin(cellAt: cell("1", in: editor), placing: .end))
         type("0", in: editor)
         type("0", in: editor)
         #expect(editor.textView.string.contains("| 100 | 2 |"))
-        // In the cell, ⌘Z undoes the cell's own typing.
-        #expect(cells.editor.undoManager?.canUndo == true)
 
         cells.end(placingCursorAt: (editor.textView.string as NSString).range(of: "after").location)
-        #expect(editor.textView.window?.firstResponder === editor.textView)
-        editor.textView.undoManager?.undo()
+        #expect(window.firstResponder === editor.textView)
+        press("undo:", in: window)
         #expect(editor.textView.string == text)
-        editor.textView.undoManager?.redo()
+        try await waitUntil { cells.isEditing }
+        #expect(cells.cellLocation == cell("1", in: editor))
+        #expect(cells.editor.selectedRange() == NSRange(location: 1, length: 0))  // where "00" was typed
+        press("redo:", in: window)
         #expect(editor.textView.string.contains("| 100 | 2 |"))
-        editor.textView.undoManager?.undo()  // and back again
+        try await waitUntil { cells.isEditing }
+        #expect(cells.editor.selectedRange() == NSRange(location: 1, length: 2))  // "00" is back, selected
+        press("undo:", in: window)  // and back again
         #expect(editor.textView.string == text)
     }
 

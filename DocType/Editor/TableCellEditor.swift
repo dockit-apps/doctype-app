@@ -2,7 +2,8 @@
 // TableCellSession. A real text view, so typing in a cell works as anywhere:
 // cursor, selection, input methods, spell checking, copy and paste. It shows
 // the cell's text with real line breaks (TableCellText) in the note's font,
-// on a clear background over the drawn grid.
+// on a clear background over the drawn grid. It has no undo of its own: what's
+// typed is a step of the note's undo, and ⌘Z goes to that (the window's).
 
 import AppKit
 
@@ -11,12 +12,15 @@ final class TableCellEditor: NSTextView {
     var onFocusChange: (Bool) -> Void = { _ in }
     /// Adds the table's items to its context menu.
     var onMenu: (NSMenu) -> Void = { _ in }
+    /// A key press is typing or deleting, not a paste, drop or Format command:
+    /// key presses in a row are one undo step (TableCellSession).
+    private(set) var isTyping = false
 
     static func make() -> TableCellEditor {
         let editor = TableCellEditor(usingTextLayoutManager: true)
         editor.isRichText = false
         editor.importsGraphics = false
-        editor.allowsUndo = true
+        editor.allowsUndo = false  // the note's undo: NSWindow sends ⌘Z there
         editor.drawsBackground = false
         editor.focusRingType = .none
         editor.textContainerInset = .zero
@@ -47,6 +51,27 @@ final class TableCellEditor: NSTextView {
         let accepted = super.resignFirstResponder()
         if accepted { onFocusChange(false) }
         return accepted
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        whileTyping { super.insertText(string, replacementRange: replacementRange) }
+    }
+
+    /// An input method's text being composed.
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        whileTyping { super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange) }
+    }
+
+    /// Keys like Delete and Shift-Return (and the arrows, which change no text).
+    override func doCommand(by selector: Selector) {
+        whileTyping { super.doCommand(by: selector) }
+    }
+
+    private func whileTyping(_ body: () -> Void) {
+        let wasTyping = isTyping
+        isTyping = true
+        defer { isTyping = wasTyping }
+        body()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

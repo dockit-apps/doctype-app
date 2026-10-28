@@ -195,6 +195,7 @@ public enum TableEditing {
             + cellsBefore.reduce(0) { $0 + ($1 as NSString).length + 1 }
         let cursor = lineStart + min(offset + 1, line.length)
         return TextEdit(range: table.range, replacement: replacement, selectionAfter: NSRange(location: cursor, length: 0))
+            .minimized(in: text)
     }
 
     // MARK: - Moving between cells

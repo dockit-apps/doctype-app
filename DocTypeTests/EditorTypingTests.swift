@@ -487,6 +487,37 @@ struct EditorTypingTests {
         #expect(textView.selectedRange() == NSRange(location: 15, length: 0))
     }
 
+    @Test func undoingACommandRestylesSavesAndPutsTheCursorAtTheChange() async throws {
+        // NSTextView undoes an edit made in code without telling its delegate;
+        // the editor finishes it like typing.
+        let (editor, folder) = try await editor(showing: "Title\n\nsome words here")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        window.makeFirstResponder(textView)
+
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        editor.format { Formatting.heading(1, in: $0, selection: $1) }
+        await editor.save()
+        textView.setSelectedRange(NSRange(location: 20, length: 0))  // somewhere else
+        textView.undoManager?.undo()
+        #expect(textView.string == "Title\n\nsome words here")
+        #expect(!editor.styler.hasPendingEdits)
+        #expect(font(at: 2, in: textView)?.pointSize == EditorTheme.bodyFont.pointSize)  // a heading no more
+        #expect(editor.isDirty)  // so autosave writes the undo
+        #expect(textView.selectedRange().location <= 5)  // at the change, in the first line
+        await editor.save()
+        let saved = try String(contentsOf: folder.appending(path: "Note.md"), encoding: .utf8)
+        #expect(saved == "Title\n\nsome words here")
+
+        textView.undoManager?.redo()
+        #expect(textView.string == "# Title\n\nsome words here")
+        #expect(font(at: 3, in: textView)?.pointSize == 26)
+        #expect(editor.isDirty)
+    }
+
     @Test func returnAfterAnOpeningFenceAddsTheClosingFence() async throws {
         let (editor, folder) = try await editor(showing: "Intro\n\n\n\nAfter")
         defer { try? FileManager.default.removeItem(at: folder) }

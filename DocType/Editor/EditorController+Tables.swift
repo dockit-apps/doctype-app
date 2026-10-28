@@ -40,18 +40,19 @@ extension EditorController {
         tableCells.begin(cellAt: edit.selectionAfter.location, placing: .text(edit.selectionAfter))
     }
 
-    /// Undoes (or redoes) a cell's edit, registered by TableCellSession: puts
+    /// Undoes (or redoes) typing in a cell, registered by TableCellSession: puts
     /// `markdown` in `range` and registers the way back. Not NSTextView's own
     /// undo for it: registered while undoing, that one reuses the old range's
-    /// length and eats the pipe after the cell. The cell then opens (the cursor
-    /// lands in the table, see moveCursorOutOfTables).
+    /// length and eats the pipe after the cell. Only the part that differs is
+    /// replaced and selected, so the cell then opens with the cursor where the
+    /// typing was (it lands in the table, see moveCursorOutOfTables).
     func replaceTableCellText(in range: NSRange, with markdown: String) {
         tableCells.end(placingCursorAt: nil)
         guard let storage = textView.textStorage, NSMaxRange(range) <= storage.length,
               let undoManager = textView.undoManager else { return }
         let replaced = storage.mutableString.substring(with: range)
         undoManager.disableUndoRegistration()
-        apply(TextEdit(range: range, replacement: markdown, selectionAfter: NSRange(location: range.location, length: 0)))
+        apply(TextEdit.replacing(replaced, with: markdown, at: range.location))
         undoManager.enableUndoRegistration()
         let back = NSRange(location: range.location, length: (markdown as NSString).length)
         undoManager.registerUndo(withTarget: self) { $0.replaceTableCellText(in: back, with: replaced) }
@@ -71,36 +72,65 @@ extension EditorController {
 
     /// The note's cursor never stays in a table's hidden markdown: arriving
     /// there (arrow keys, undo, a click beside the cells) edits the cell instead.
-    /// A selection reaching out of one cell (select all, a drag) stays as it is.
+    /// A selection reaching out of one cell (select all, a drag) stays as it is,
+    /// unless an undo or redo made it (a row that came back): then the cell
+    /// where it ends opens.
     func moveCursorOutOfTables() {
-        let vertical = pendingVerticalMove
+        let move = CursorMove(vertical: pendingVerticalMove,
+                              isUndo: textView.undoManager.map { $0.isUndoing || $0.isRedoing } ?? false)
         pendingVerticalMove = nil
-        guard !tableCells.isEditing, !styler.hasPendingEdits, textView.window?.firstResponder === textView,
-              let text = textView.textStorage?.mutableString else { return }
-        let selection = textView.selectedRange()
-        guard let table = TableEditing.table(at: selection.location, in: text, blockMap: styler.blockMap),
-              let (position, column) = table.position(of: selection.location) else { return }
-        let row = position == 1 ? 0 : position
-        guard !table.cells[row].isEmpty else { return }
-        let cell = table.cells[row][min(column, table.cells[row].count - 1)]
-        let content = TableEditing.contentRange(of: cell, in: text)
-        guard selection.length == 0
-                || (selection.location >= content.location && NSMaxRange(selection) <= NSMaxRange(content)) else { return }
-        var target = cell.location
-        let placement: TableCellSession.Placement
-        if let vertical, let cellInColumn = textView.tableCell(inRowAt: selection.location, x: vertical.x) {
-            // ↑ / ↓ from the text: the cell in the column the cursor was in.
-            target = cellInColumn
-            placement = .line(x: vertical.x, last: vertical.up)
-        } else if selection.length > 0 || (selection.location > content.location && selection.location < NSMaxRange(content)) {
-            placement = .text(selection)
-        } else {
-            placement = selection.location <= content.location ? .start : .end
-        }
-        // After this selection change is done; the note's text view is still handling it.
+        guard cellToEdit(after: move) != nil else { return }
+        // After this selection change is done (the note's text view is still
+        // handling it), worked out again: another change, such as a quick second
+        // ⌘Z, may come first.
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.tableCells.isEditing else { return }
-            self.tableCells.begin(cellAt: target, placing: placement)
+            guard let self, let found = self.cellToEdit(after: move) else { return }
+            if found.selection != self.textView.selectedRange() { self.textView.setSelectedRange(found.selection) }
+            self.tableCells.begin(cellAt: found.location, placing: found.placement)
         }
+    }
+
+    /// How the note's cursor got where it is.
+    private struct CursorMove {
+        /// ↑ or ↓: where the cursor was across.
+        var vertical: (x: CGFloat, up: Bool)?
+        var isUndo: Bool
+    }
+
+    /// The cell to edit because the note's selection is in a table, where in it
+    /// the cursor goes, and the note's selection that leads there; nil when
+    /// it isn't, or a cell is open already.
+    private func cellToEdit(after move: CursorMove)
+        -> (location: Int, placement: TableCellSession.Placement, selection: NSRange)? {
+        guard !tableCells.isEditing, !styler.hasPendingEdits, textView.window?.firstResponder === textView,
+              let text = textView.textStorage?.mutableString else { return nil }
+        var selection = textView.selectedRange()
+        guard let table = TableEditing.table(at: selection.location, in: text, blockMap: styler.blockMap) else { return nil }
+        // The cell at `location` and its text without the spaces around it.
+        func cell(at location: Int) -> (range: NSRange, content: NSRange)? {
+            guard let (position, column) = table.position(of: location) else { return nil }
+            let row = position == 1 ? 0 : position  // the hidden |---| row: the header
+            guard !table.cells[row].isEmpty else { return nil }
+            let range = table.cells[row][min(column, table.cells[row].count - 1)]
+            return (range, TableEditing.contentRange(of: range, in: text))
+        }
+        guard var found = cell(at: selection.location) else { return nil }
+        var isInCell = selection.location >= found.content.location && NSMaxRange(selection) <= NSMaxRange(found.content)
+        if !isInCell, selection.length > 0, move.isUndo, NSMaxRange(selection) <= NSMaxRange(table.range),
+           let end = cell(at: NSMaxRange(selection)) {
+            selection = NSRange(location: NSMaxRange(selection), length: 0)
+            found = end
+            isInCell = true
+        }
+        guard selection.length == 0 || isInCell else { return nil }
+        if let vertical = move.vertical, let cellInColumn = textView.tableCell(inRowAt: selection.location, x: vertical.x) {
+            // ↑ / ↓ from the text: the cell in the column the cursor was in.
+            return (cellInColumn, .line(x: vertical.x, last: vertical.up), selection)
+        }
+        let content = found.content
+        if selection.length > 0 || (selection.location > content.location && selection.location < NSMaxRange(content)) {
+            return (found.range.location, .text(selection), selection)
+        }
+        return (found.range.location, selection.location <= content.location ? .start : .end, selection)
     }
 }
