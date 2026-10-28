@@ -49,18 +49,30 @@ struct InlineStylingTests {
 
     @Test func linkTextIsStyledAndURLSyntaxIsAMarker() {
         let text = "see [the docs](https://example.com \"Title\") now"
-        #expect(has(text, "the docs", .link))
+        #expect(has(text, "the docs", .link(destination: "https://example.com")))
         #expect(styled(text).filter { $0.1 == .syntaxMarker }.map(\.0) == ["[", "](https://example.com \"Title\")"])
+        #expect(has("[notes](../Uni/Graphs.md)", "notes", .link(destination: "../Uni/Graphs.md")))
     }
 
     @Test func angleBracketAutolinksAreLinks() {
-        #expect(has("<https://example.com>", "https://example.com", .link))
+        #expect(has("<https://example.com>", "https://example.com", .link(destination: "https://example.com")))
     }
 
-    /// swift-markdown doesn't enable GFM's bare-URL autolink extension, so the editor
-    /// (and the preview, which uses the same parser) leave bare URLs as text for now.
-    @Test func bareURLsAreNotLinkedYet() {
-        #expect(!styled("visit https://example.com today").contains { $0.1 == .link })
+    private func bareLinks(_ text: String) -> [String] {
+        styled(text).compactMap { if case .link(let destination) = $0.1 { "\($0.0) → \(destination)" } else { nil } }
+    }
+
+    @Test func bareURLsAreLinks() {
+        #expect(bareLinks("visit https://example.com/a?b=1 today") == ["https://example.com/a?b=1 → https://example.com/a?b=1"])
+        #expect(bareLinks("or www.apple.com.") == ["www.apple.com → https://www.apple.com"])
+        #expect(bareLinks("(see http://x.org/wiki/Graph_(math)), ok") == ["http://x.org/wiki/Graph_(math) → http://x.org/wiki/Graph_(math)"])
+        #expect(bareLinks("**https://bold.dev**") == ["https://bold.dev → https://bold.dev"])
+    }
+
+    @Test func thingsThatAreNotBareURLs() {
+        #expect(bareLinks("myhttps://x.org and http:// and www. alone").isEmpty)
+        #expect(bareLinks("`https://in.code` and\n\n    https://indented.code").isEmpty)
+        #expect(bareLinks("[label](https://a.org) <https://b.org>").count == 2)  // not linked twice
     }
 
     @Test func inlineMarkersRevealOnTheirLine() {

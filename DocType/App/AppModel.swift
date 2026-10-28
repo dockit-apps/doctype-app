@@ -62,6 +62,7 @@ final class AppModel {
 
     init() {
         editor.onError = { [weak self] message in self?.errorMessage = message }
+        editor.onOpenLink = { [weak self] destination in self?.openLink(destination) }
         // When the app only hosts unit tests, don't open (and watch) the user's library.
         let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         if !isTestHost, let url = LibraryBookmark.load() {

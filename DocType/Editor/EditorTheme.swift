@@ -18,6 +18,8 @@ enum EditorTheme {
     static let bulletKey = NSAttributedString.Key("DocTypeBullet")
     /// Marks a task's "[ ]" (drawn as a checkbox); the value is true when checked.
     static let taskKey = NSAttributedString.Key("DocTypeTask")
+    /// Marks a link's text; the value is its destination (⌘-click opens it).
+    static let linkKey = NSAttributedString.Key("DocTypeLink")
     /// Space between the quote bar and the quoted text.
     static let quoteIndent: CGFloat = 18
 
@@ -88,8 +90,8 @@ enum EditorTheme {
             [.foregroundColor: NSColor.secondaryLabelColor]
         case .strikethrough:
             [.strikethroughStyle: NSUnderlineStyle.single.rawValue]
-        case .link:
-            [.foregroundColor: NSColor.linkColor]
+        case .link(let destination):
+            [.foregroundColor: NSColor.linkColor, linkKey: destination]
         case .listBullet:
             // Keeps its width; BlockDecorations draws a bullet there.
             [.foregroundColor: NSColor.clear, bulletKey: true]

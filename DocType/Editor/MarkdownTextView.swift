@@ -1,5 +1,5 @@
 // The editor's text view: a plain-text NSTextView on TextKit 2, configured for markdown.
-// Reports focus changes and clicks on task checkboxes.
+// Reports focus changes, clicks on task checkboxes and ⌘-clicks on links.
 
 import AppKit
 
@@ -10,8 +10,16 @@ final class MarkdownTextView: NSTextView {
     /// Called with the location of a task's "[ ]" when its checkbox is clicked.
     var onTaskBoxClick: (Int) -> Void = { _ in }
 
+    /// Called with a link's destination when it's ⌘-clicked.
+    var onLinkClick: (String) -> Void = { _ in }
+
     override func mouseDown(with event: NSEvent) {
-        guard let box = taskBoxLocation(at: convert(event.locationInWindow, from: nil)) else {
+        let point = convert(event.locationInWindow, from: nil)
+        if event.modifierFlags.contains(.command), let destination = linkDestination(at: point) {
+            onLinkClick(destination)
+            return
+        }
+        guard let box = taskBoxLocation(at: point) else {
             super.mouseDown(with: event)
             return
         }
@@ -21,22 +29,52 @@ final class MarkdownTextView: NSTextView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        if taskBoxLocation(at: convert(event.locationInWindow, from: nil)) != nil { NSCursor.pointingHand.set() }
+        updateCursor(at: convert(event.locationInWindow, from: nil), modifiers: event.modifierFlags)
+    }
+
+    /// Pressing or releasing ⌘ over a link switches between the hand and the I-beam.
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        guard let window else { return }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard visibleRect.contains(point) else { return }
+        if !updateCursor(at: point, modifiers: event.modifierFlags) { NSCursor.iBeam.set() }
+    }
+
+    /// Shows the pointing hand over checkboxes, and over links while ⌘ is held.
+    @discardableResult
+    private func updateCursor(at point: NSPoint, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let overLink = modifiers.contains(.command) && linkDestination(at: point) != nil
+        guard overLink || taskBoxLocation(at: point) != nil else { return false }
+        NSCursor.pointingHand.set()
+        return true
     }
 
     /// Where the "[ ]" of the checkbox under `point` (view coordinates) starts, if any.
     func taskBoxLocation(at point: NSPoint) -> Int? {
+        // The checkbox is drawn over the "[ ]" characters; allow a little slack around it.
+        hit(EditorTheme.taskKey, at: point, slack: CGSize(width: 3, height: 2))?.range.location
+    }
+
+    /// The destination of the link under `point`, if any.
+    func linkDestination(at point: NSPoint) -> String? {
+        hit(EditorTheme.linkKey, at: point, slack: .zero)?.value as? String
+    }
+
+    /// The run of `key` under `point` (view coordinates): its value and range.
+    private func hit(_ key: NSAttributedString.Key, at point: NSPoint, slack: CGSize) -> (value: Any, range: NSRange)? {
         guard let storage = textStorage, storage.length > 0, let window else { return nil }
         let index = characterIndexForInsertion(at: point)
         for candidate in [index - 1, index] where candidate >= 0 && candidate < storage.length {
-            var box = NSRange()
+            var run = NSRange()
             let line = (storage.string as NSString).lineRange(for: NSRange(location: candidate, length: 0))
-            guard storage.attribute(EditorTheme.taskKey, at: candidate, longestEffectiveRange: &box, in: line) != nil
-            else { continue }
-            // The checkbox is drawn over the "[ ]" characters; allow a little slack around it.
-            let screenRect = firstRect(forCharacterRange: box, actualRange: nil)
-            let rect = convert(window.convertFromScreen(screenRect), from: nil)
-            if rect.insetBy(dx: -3, dy: -2).contains(point) { return box.location }
+            guard let value = storage.attribute(key, at: candidate, longestEffectiveRange: &run, in: line) else { continue }
+            // The clicked character itself (not the run's first rect: a link can wrap).
+            let screenRect = firstRect(forCharacterRange: NSRange(location: candidate, length: 1), actualRange: nil)
+            let character = convert(window.convertFromScreen(screenRect), from: nil)
+            if character.insetBy(dx: -slack.width, dy: -slack.height).contains(point) {
+                return (value, run)
+            }
         }
         return nil
     }

@@ -26,8 +26,9 @@ public enum Style: Hashable, Sendable {
     case emphasis
     case strikethrough
     case inlineCode
-    /// A link's visible text (its URL syntax is a marker).
-    case link
+    /// A link's visible text (its URL syntax is a marker). `destination` is what
+    /// ⌘-click opens: a URL, or a path relative to the note.
+    case link(destination: String)
 
     // Lists
     /// "-", "*" or "+" of a list item: keeps its width but is drawn as a bullet.

@@ -1,5 +1,5 @@
-// Inline styles (bold, italic, strikethrough, code, links), list and task markers,
-// and table pipes.
+// Inline styles (bold, italic, strikethrough, code, links, bare URLs), list and
+// task markers, and table pipes.
 //
 // Inline markers (`**`, `` ` ``, `[`, `](url)`) behave like block markers: shown
 // dimmed on the cursor's line, hidden elsewhere. List bullets and task boxes are
@@ -67,16 +67,31 @@ extension SpanCollector {
     }
 
     /// `[text](url)`: the text is styled as a link; `[` and `](url)` are markers.
-    /// `<url>` hides its angle brackets; a bare URL is all link text.
+    /// `<url>` hides its angle brackets.
     mutating func visitLink(_ link: Link) {
-        defer { descendInto(link) }
+        let wasInsideLink = isInsideLink
+        isInsideLink = true
+        defer {
+            descendInto(link)
+            isInsideLink = wasInsideLink
+        }
         guard let range = localRange(link),
               let first = link.children.first(where: { _ in true }).flatMap(localRange),
               let last = Array(link.children).last.flatMap(localRange) else { return }
         let label = NSRange(location: first.location, length: last.upperBound - first.location)
-        inline(label, .link)
+        inline(label, .link(destination: link.destination ?? ""))
         marker(NSRange(location: range.location, length: label.location - range.location))
         marker(NSRange(location: label.upperBound, length: range.upperBound - label.upperBound))
+    }
+
+    /// Bare URLs in text (`https://…`, `www.…`) are links too, as on GitHub.
+    /// swift-markdown leaves GFM's autolink extension off, so they're found here.
+    mutating func visitText(_ text: Text) {
+        guard !isInsideLink, let range = localRange(text), range.length > 0 else { return }
+        for url in BareURL.matches(in: source, range: range) {
+            let string = source.substring(with: url)
+            inline(url, .link(destination: string.hasPrefix("www.") ? "https://" + string : string))
+        }
     }
 
     // MARK: - Lists

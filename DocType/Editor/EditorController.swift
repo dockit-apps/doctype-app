@@ -36,6 +36,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored private var isMoving = false
     @ObservationIgnored var library: Library?
     @ObservationIgnored var onError: (String) -> Void = { _ in }
+    /// Called with a link's destination when it's ⌘-clicked.
+    @ObservationIgnored var onOpenLink: (String) -> Void = { _ in }
 
     override init() {
         (scrollView, textView) = MarkdownTextView.makeScrollableEditor()
@@ -46,6 +48,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.textLayoutManager?.delegate = blockDecorations
         textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
         textView.onTaskBoxClick = { [weak self] in self?.toggleTask(at: $0) }
+        textView.onLinkClick = { [weak self] in self?.onOpenLink($0) }
     }
 
     func focusText() {

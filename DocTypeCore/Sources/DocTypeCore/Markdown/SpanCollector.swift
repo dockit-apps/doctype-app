@@ -13,6 +13,8 @@ struct SpanCollector: MarkupWalker {
     var containerSpans: [StyleSpan] = []
     var inlineSpans: [StyleSpan] = []
     var markerSpans: [StyleSpan] = []
+    /// True while visiting a link's children, whose text is already linked.
+    var isInsideLink = false
 
     /// The node's range relative to the block (not yet shifted by `base`).
     func localRange(_ markup: Markup) -> NSRange? {
