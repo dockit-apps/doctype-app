@@ -45,6 +45,8 @@ final class CommandRunner {
             model.editor.performFind(.nextMatch)
         case .findPrevious:
             model.editor.performFind(.previousMatch)
+        case .searchNotes:
+            model.searchFocusRequest += 1
         case .bold:
             model.editor.format { Formatting.toggle(.strong, in: $0, selection: $1) }
         case .italic:
@@ -87,6 +89,8 @@ final class CommandRunner {
             model.selectedNotePath != nil && !model.editor.tags.isEmpty
         case .find, .findAndReplace, .findNext, .findPrevious:
             model.selectedNotePath != nil
+        case .searchNotes:
+            model.hasUsableLibrary
         case .bold, .italic, .inlineCode, .link, .heading1, .heading2, .heading3, .bodyText, .taskItem:
             // Only while typing in the note, so they never touch the title field.
             model.selectedNotePath != nil && model.editor.hasFocus

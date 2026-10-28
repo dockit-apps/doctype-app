@@ -36,8 +36,14 @@ final class AppModel {
     var sidebarSelection: LibraryIndex.Filter? = .all {
         didSet { refreshVisibleNotes() }
     }
-    /// Notes for the current sidebar selection, newest first. Cached so the list
-    /// doesn't re-sort the whole library every time SwiftUI reads it.
+    /// What's typed in the search field. Searches the current sidebar selection.
+    var searchQuery = "" {
+        didSet { if searchQuery != oldValue { refreshVisibleNotes(afterTyping: true) } }
+    }
+    /// Incremented to ask the note list to focus the search field.
+    var searchFocusRequest = 0
+    /// Notes for the current sidebar selection (and search), newest first. Cached
+    /// so the list doesn't re-sort the whole library every time SwiftUI reads it.
     private(set) var visibleNotes: [NoteSummary] = []
     var selectedNotePath: String?
 
@@ -50,6 +56,7 @@ final class AppModel {
     @ObservationIgnored private var updatesTask: Task<Void, Never>?
     @ObservationIgnored private var changesTask: Task<Void, Never>?
     @ObservationIgnored private var hasOpenedANote = false
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     private static let lastOpenNoteKey = "lastOpenNote"
 
@@ -62,11 +69,43 @@ final class AppModel {
         }
     }
 
-    private func refreshVisibleNotes() {
-        visibleNotes = index.notes(matching: sidebarSelection ?? .all)
+    /// Recomputes the list. A search runs off the main thread; while typing it
+    /// waits for a short pause first, and a newer search cancels an older one,
+    /// so holding a key never queues up stale searches.
+    private func refreshVisibleNotes(afterTyping: Bool = false) {
+        searchTask?.cancel()
+        let filter = sidebarSelection ?? .all
+        let search = NoteSearch(searchQuery)
+        guard !search.isEmpty else {
+            visibleNotes = index.notes(matching: filter)
+            return
+        }
+        let index = index
+        searchTask = Task {
+            if afterTyping { try? await Task.sleep(for: .milliseconds(150)) }
+            let results = await Self.results(of: search, in: index, filter: filter)
+            guard !Task.isCancelled else { return }
+            visibleNotes = results
+        }
+    }
+
+    @concurrent
+    private nonisolated static func results(of search: NoteSearch, in index: LibraryIndex,
+                                            filter: LibraryIndex.Filter) async -> [NoteSummary] {
+        guard !Task.isCancelled else { return [] }
+        return search.results(in: index, filter: filter)
     }
 
     var hasUsableLibrary: Bool { library != nil && !isLibraryMissing }
+
+    /// Return in the search field: open the best match. Searches right away
+    /// rather than using the list, which may still be waiting for the typing pause.
+    func openFirstSearchResult() {
+        let search = NoteSearch(searchQuery)
+        guard !search.isEmpty,
+              let first = search.results(in: index, filter: sidebarSelection ?? .all).first else { return }
+        selectedNotePath = first.path
+    }
 
     // MARK: - Commands
 
@@ -180,6 +219,7 @@ final class AppModel {
         isLibraryMissing = false
         index = LibraryIndex()
         sidebarSelection = .all
+        searchQuery = ""
         // The last note opens right away; it doesn't wait for the scan.
         selectedNotePath = notePath
 
