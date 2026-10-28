@@ -84,6 +84,16 @@ extension SpanCollector {
         marker(NSRange(location: label.upperBound, length: range.upperBound - label.upperBound))
     }
 
+    /// `![alt](source)`: one span for the whole syntax; the alt text isn't styled.
+    mutating func visitImage(_ image: Image) {
+        guard let range = localRange(image), range.length > 0, !isInsideLink else { return }
+        let alt = Array(image.children).compactMap { ($0 as? Text)?.string }.joined()
+        let width = ImageSizing.parse(alt: alt).width
+        let line = lineWithoutBreak(containing: range.location)
+        inlineSpans.append(StyleSpan(shifted(range), .image(source: image.source ?? "", width: width),
+                                     revealRange: shifted(line)))
+    }
+
     /// Bare URLs in text (`https://…`, `www.…`) are links too, as on GitHub.
     /// swift-markdown leaves GFM's autolink extension off, so they're found here.
     mutating func visitText(_ text: Text) {

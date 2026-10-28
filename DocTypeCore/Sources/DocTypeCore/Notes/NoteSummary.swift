@@ -170,7 +170,8 @@ enum Snippet {
 
             if character == "[" || (character == "!" && next == "["),
                let link = linkText(in: characters, openingAt: character == "!" ? i + 1 : i) {
-                result += link.text
+                // An image's "alt|300" width isn't part of its text.
+                result += character == "!" ? ImageSizing.parse(alt: link.text).alt : link.text
                 i = link.end
                 continue
             }

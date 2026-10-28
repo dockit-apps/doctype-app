@@ -29,6 +29,10 @@ public enum Style: Hashable, Sendable {
     /// A link's visible text (its URL syntax is a marker). `destination` is what
     /// ⌘-click opens: a URL, or a path relative to the note.
     case link(destination: String)
+    /// The whole `![alt](source)` syntax of an image. The editor shows the picture
+    /// below the line and hides the syntax, except while the cursor is on the
+    /// line (`revealRange`). `width` comes from "alt|300" (see ImageSizing).
+    case image(source: String, width: Int?)
 
     // Lists
     /// "-", "*" or "+" of a list item: keeps its width but is drawn as a bullet.

@@ -1,6 +1,7 @@
 // Draws decorations behind and over the text, the way chat apps and Obsidian do:
 // code blocks as one rounded box, block quotes with a bar on the left, `---` as a
-// horizontal rule, list bullets as "•" and tasks as checkboxes.
+// horizontal rule, list bullets as "•", tasks as checkboxes, and images under
+// the line that holds their syntax.
 //
 // TextKit 2 lays out each paragraph in its own layout fragment. EditorTheme marks
 // lines and characters with attributes; this delegate reads them and returns a
@@ -33,6 +34,9 @@ final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
         string.enumerateAttribute(EditorTheme.taskKey, in: whole) { value, markRange, _ in
             if let checked = value as? Bool { decorations.marks.append(ListMark(range: markRange, kind: .task(checked: checked))) }
         }
+        string.enumerateAttribute(EditorTheme.imageKey, in: whole) { value, imageRange, _ in
+            if let image = value as? ImageAttribute { decorations.images.append(ImageMark(image: image, range: imageRange)) }
+        }
         guard decorations.isNeeded else { return NSTextLayoutFragment(textElement: textElement, range: range) }
         return DecoratedLayoutFragment(textElement: textElement, range: range, decorations: decorations)
     }
@@ -50,12 +54,19 @@ nonisolated struct ListMark {
     let kind: Kind
 }
 
+nonisolated struct ImageMark {
+    let image: ImageAttribute
+    /// Range of the image's syntax within the paragraph.
+    let range: NSRange
+}
+
 nonisolated struct Decorations {
     var codeBlock: CodeBlockLinePosition?
     var quote = false
     var rule = false
     var marks: [ListMark] = []
-    var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty }
+    var images: [ImageMark] = []
+    var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty || !images.isEmpty }
 }
 
 /// `nonisolated`: TextKit 2 may lay out and draw fragments off the main thread.
@@ -89,7 +100,62 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
     }
 
     override var renderingSurfaceBounds: CGRect {
-        super.renderingSurfaceBounds.union(fullWidth)
+        imageFrames.reduce(super.renderingSurfaceBounds.union(fullWidth)) { $0.union($1.frame.insetBy(dx: -4, dy: -4)) }
+    }
+
+    // MARK: - Images
+
+    /// Where each image is drawn, in fragment coordinates: stacked under the
+    /// paragraph's text, starting where the text starts.
+    var imageFrames: [(mark: ImageMark, frame: CGRect)] {
+        guard !decorations.images.isEmpty else { return [] }
+        let x = textLineFragments.first?.typographicBounds.minX ?? 0
+        var y = (textLineFragments.last?.typographicBounds.maxY ?? 0) + EditorTheme.imageGap
+        return decorations.images.map { mark in
+            defer { y += mark.image.size.height + EditorTheme.imageGap }
+            return (mark, CGRect(origin: CGPoint(x: x, y: y), size: mark.image.size))
+        }
+    }
+
+    /// The square at an image's bottom-right corner that resizes it.
+    static func resizeHandle(of frame: CGRect) -> CGRect {
+        CGRect(x: frame.maxX - 5, y: frame.maxY - 5, width: 10, height: 10)
+    }
+
+    private func drawImages(at point: CGPoint, _ context: CGContext) {
+        let scale = (NSScreen.main?.backingScaleFactor ?? 2)
+        for (mark, frame) in imageFrames {
+            let rect = frame.offsetBy(dx: point.x, dy: point.y)
+            let clip = CGPath(roundedRect: rect, cornerWidth: 6, cornerHeight: 6, transform: nil)
+            let maxPixels = Int((max(rect.width, rect.height) * scale / 256).rounded(.up)) * 256
+            context.saveGState()
+            context.addPath(clip)
+            context.clip()
+            if let image = ImageStore.shared.thumbnail(for: mark.image.url, maxPixelSize: maxPixels) {
+                // The view is flipped; CGImages draw bottom-up.
+                context.translateBy(x: rect.minX, y: rect.maxY)
+                context.scaleBy(x: 1, y: -1)
+                context.interpolationQuality = .high
+                context.draw(image, in: CGRect(origin: .zero, size: rect.size))
+            } else {
+                context.setFillColor(NSColor.quaternarySystemFill.cgColor)
+                context.fill(rect)
+            }
+            context.restoreGState()
+
+            guard mark.image.isSelected else { continue }
+            context.saveGState()
+            context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+            context.setLineWidth(2)
+            context.addPath(CGPath(roundedRect: rect.insetBy(dx: -1, dy: -1), cornerWidth: 7, cornerHeight: 7, transform: nil))
+            context.strokePath()
+            let handle = Self.resizeHandle(of: rect)
+            context.setFillColor(NSColor.white.cgColor)
+            context.fillEllipse(in: handle)
+            context.setLineWidth(1.5)
+            context.strokeEllipse(in: handle.insetBy(dx: 0.75, dy: 0.75))
+            context.restoreGState()
+        }
     }
 
     override func draw(at point: CGPoint, in context: CGContext) {
@@ -107,6 +173,7 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         context.restoreGState()
         super.draw(at: point, in: context)
         for mark in decorations.marks { draw(mark, at: point, context) }
+        drawImages(at: point, context)
     }
 
     // MARK: - Bullets and checkboxes

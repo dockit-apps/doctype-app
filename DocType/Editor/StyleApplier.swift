@@ -22,14 +22,29 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     private var pendingRange: NSRange?
     /// The selection the current styles were applied for (markers on its lines are shown).
     private var styledSelection = NSRange(location: 0, length: 0)
+    /// How to find the open note's images; nil shows image syntax as text.
+    var imageContext: ImageContext?
+    /// Called with images found while styling `range` that need measuring first;
+    /// restyle the range once they are.
+    var onUnmeasuredImages: (_ urls: [URL], _ range: NSRange) -> Void = { _, _ in }
+
+    /// The image context with the editor's current width.
+    private var currentImageContext: ImageContext? {
+        guard var context = imageContext else { return nil }
+        if let container = textView?.textContainer, container.size.width > 100 {
+            context.maxWidth = container.size.width - 2 * container.lineFragmentPadding
+        }
+        return context
+    }
 
     /// Replaces the whole text with an already-styled document (opening a note).
     /// `selection` is where the cursor will be, which decides the visible markers.
     func replaceDocument(in storage: NSTextStorage, text: String, blockMap: BlockMap, spans: [StyleSpan],
                          selection: NSRange) {
         let attributed = NSMutableAttributedString(string: text)
-        EditorTheme.apply(spans, to: attributed, resetting: NSRange(location: 0, length: attributed.length),
-                          selection: selection)
+        let whole = NSRange(location: 0, length: attributed.length)
+        let unmeasured = EditorTheme.apply(spans, to: attributed, resetting: whole, selection: selection,
+                                           images: currentImageContext)
         // The new map goes in before the new text, and nothing restyles during the
         // swap: TextKit adjusts the selection (and tells the delegate) in the middle
         // of it, while the text is already styled for `selection`.
@@ -39,6 +54,20 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         isReplacingDocument = true
         defer { isReplacingDocument = false }
         storage.setAttributedString(attributed)
+        if !unmeasured.isEmpty { onUnmeasuredImages(unmeasured, whole) }
+    }
+
+    /// Restyles the blocks overlapping `ranges` (e.g. after their images loaded).
+    func restyle(_ ranges: [NSRange], in storage: NSTextStorage) {
+        guard pendingRange == nil, textView?.hasMarkedText() != true else { return }
+        restyleBlocks(touching: ranges, in: storage)
+    }
+
+    /// Shows the image whose syntax starts at `location` at `width` while its
+    /// resize handle is dragged; nil goes back to the width in the text.
+    func previewImageWidth(_ width: CGFloat?, at location: Int, in storage: NSTextStorage) {
+        imageContext?.widthOverride = width.map { (location, $0) }
+        restyle([NSRange(location: location, length: 0)], in: storage)
     }
 
     func textStorage(
@@ -121,7 +150,9 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
 
     private func apply(_ range: NSRange, in storage: NSTextStorage, selection: NSRange) {
         let spans = MarkdownStyler.spans(in: storage.mutableString, blocks: blockMap.blocks(in: range))
-        EditorTheme.apply(spans, to: storage, resetting: range, selection: selection)
+        let unmeasured = EditorTheme.apply(spans, to: storage, resetting: range, selection: selection,
+                                           images: currentImageContext)
+        if !unmeasured.isEmpty { onUnmeasuredImages(unmeasured, range) }
     }
 
     /// Keeps a range inside the text. Unlike NSIntersectionRange, an empty range at

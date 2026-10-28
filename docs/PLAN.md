@@ -135,6 +135,7 @@ The note list, tags and search use an in-memory `LibraryIndex` built by a backgr
 - **Stability rule (after the Phase 7 crash).** Objective-C exceptions crash immediately (`NSApplicationCrashOnExceptions`) instead of leaving the Swift concurrency runtime corrupted; styling never passes a range outside the text to NSString. Before each phase is handed over: switch through many notes under lldb with exception breakpoints, and check idle CPU/energy.
 - **Phase 9 notes.** The frontmatter isn't in the text view, so tag changes register their own undo action on the editor's undo manager (⌘Z works as for typing) and go through autosave. `Frontmatter.settingTags` keeps the entry's list style (flow, comma list or block), CRLF, and every other line byte-for-byte; quotes tags YAML would misread; removing the last tag removes the entry and an emptied block. The tags reader now splits only at commas outside quotes. Tags are case-insensitive and the sidebar shows each in its most used spelling. Add Tag… (⇧⌘T, or "+" in the tag row) offers the library's tags plus "Create tag ‘x’"; Remove Tag… or right-click a tag removes it. New notes created while a tag is selected get that tag.
 - **Phase 10 notes.** Each note's whole text (title, frontmatter, body) is folded once when indexed (case, accents and width removed; Turkish "ı" → "i"), so a search is a byte search (`memmem`) per word and per note instead of `localizedStandardContains`. A note matches when it contains every query word; notes with every word in the title come first, then the rest, each newest first. Measured in release on the 1,000-note fixture: worst search per keystroke 1.6 ms (budget 50 ms); the scan went from about 190 to 205 ms; the real app's idle memory went from about 64 to 74 MB. Search waits for a 150 ms typing pause, runs off the main thread, and a newer search cancels the older one; Return opens the best match. Search Notes… is ⇧⌘F. `TaskCounter` counts `[ ]`/`[x]` list items outside fenced code, and rows show "done/total" with a ring.
+- **Phase 11 notes.** TextKit 2 reports a character's position (and puts the caret) halfway into the kerning of the character before it, while the glyph is drawn after all of it; table padding therefore goes on a cell's last character, usually its trailing space, so the caret at the end of a cell's text stays put. Table styling measures every cell per keystroke in the table: about 22 ms for a 300-row table in a debug build, a few ms for normal tables. Spell checking skips syntax, bare URLs, image paths and code.
 - **Styling is applied after each edit, not during it.** Changing attributes inside `willProcessEditing` made TextKit 2 move the cursor (typing in the middle of a note jumped lines). The block map still updates during the edit; the attributes follow in a separate attribute-only edit. An app test target (`DocTypeTests`) now types into a real TextKit 2 editor to guard this.
 - **Section 7 pieces.** Claude writes first versions, each with a header comment covering what it does, why, and the alternatives, plus tests that describe the behavior. **Fixed rule for the conflict banner:** no choice ever loses text. Whichever version is discarded is first saved next to the note as `<name> (conflict <yyyy-MM-dd HHmmss>).md`. That name is deliberately a normal note, so it shows up in the list and you can't miss it.
 
@@ -436,34 +437,15 @@ Shared tooling:
 - Tasks inside code fences aren't counted (core test).
 - Progress updates within about 1 s of toggling a task.
 
-### Phase 11 — Preview
-**Builds**
-- **Core `HTMLRenderer`:** strips frontmatter, then runs swift-markdown's `HTMLFormatter`. That formatter already renders GFM tables, strikethrough, task checkboxes and `class="language-x"` on code, which highlight.js reads.
-- **Core `TaskToggle.edit(togglingTaskNumber:in:)`:** the nth checkbox in document order, from the same parse.
-- **App `PreviewView`, the page:**
-  - WKWebView loads bundled `preview.html` once (`loadFileURL(_:allowingReadAccessTo:)`);
-  - content is pushed with `callAsyncJavaScript("render(html)", arguments:)`, which passes the HTML as an argument and needs no escaping;
-  - vendored, pinned highlight.js 11.x with light and dark themes via `prefers-color-scheme`;
-  - a **Content-Security-Policy that allows only bundled scripts**, because `HTMLFormatter` passes raw HTML through;
-  - non-persistent data store.
-- **App `PreviewView`, behavior:**
-  - checkbox clicks post the checkbox index to a message handler, which applies the edit to the editor buffer (undoable), and the preview re-renders;
-  - link clicks are cancelled and opened with `NSWorkspace`;
-  - re-renders are debounced on edits;
-  - Toggle Preview (⌥⌘P; layout per Q4) keeps an approximate proportional scroll position.
-
-**Uses**
-- WebKit `WKWebView`: fixed decision.
-- highlight.js: fixed decision, vendored so the preview works offline.
+### Phase 11 — Links, tables and images in the editor (replaces the preview)
+**Decision (2026-10-28):** no web preview. Live styling already shows almost everything a preview would, and a WKWebView would roughly double memory (a separate web content process), add a second rendering path to keep in sync, and need a strict CSP for raw HTML. What a preview added is done in the editor instead:
+- **Links:** ⌘-click opens them (pointing hand while ⌘ is held). Bare URLs (`https://…`, `www.…`) are links, following GitHub's autolink rules (core `BareURL`). Core `LinkTarget`: a URL with a scheme opens with the system; a path is relative to the note's folder (a leading `/` means the library root); a `.md` inside the library opens as a note in DocType; other files open with their app.
+- **Tables:** columns line up without changing the text. Each cell (core `.tableCell` spans: row, column, alignment from `:---:`) is measured as styled and widened with kerning; the header row is bold. A row wider than the editor still wraps.
+- **Images:** shown under the line holding `![alt](path)`, in space reserved with paragraph spacing; the syntax is hidden except on the cursor's line. Local files only (relative to the note, like links); web images and missing files keep their syntax visible. Width is stored as `![alt|300](path)` (Obsidian's syntax; core `ImageSizing`), default at most 400 pt and never wider than the editor. Click an image to select it (outline and handle), drag the handle or right edge to resize live, release to write the width (one undo step); double-click opens the file. Sizes come from file headers, read off the main thread before a note appears; thumbnails are decoded downsampled (×2 for Retina) off the main thread into a 64 MB cache.
 
 **Verify**
-- Core test: for every fixture, the number of rendered checkboxes equals `TaskToggle`'s count. Frontmatter is absent from the HTML.
-- Toggling preview on the 5,000-line note takes under 300 ms.
-- Swift, Python, C, JS and Bash code blocks are highlighted.
-- A checkbox click updates the editor and the file, and the scroll position is kept.
-- `<script>alert(1)</script>` and `<img src=x onerror=alert(1)>` in a note do nothing.
-- Links open in the default browser.
-- The preview works with Wi-Fi off and follows dark mode.
+- Core tests for bare URLs, link targets, table cells and the width syntax; app tests for link hit-testing, column alignment while typing, image measuring, live resize and undo.
+- Typing budget unchanged on the 5,000-line fixture.
 
 ### Phase 12 — Shortcut settings
 **Builds**
@@ -521,7 +503,7 @@ Shared tooling:
    | Find / Find & Replace | ⌘F / ⌥⌘F | Task Item | ⇧⌘L (as in Apple Notes) |
    | Search All Notes | ⇧⌘F | Toggle Preview | ⌥⌘P |
 ANSWER: Proposed set is good. But you should be able to change (these) shortcuts in the settings/configuration.
-4. **Preview layout (Phase 11).** Should the preview replace the editor (a toggle) or sit beside it? *Default: replace.* Four columns are cramped on a laptop.
+4. **Preview layout (Phase 11).** Should the preview replace the editor (a toggle) or sit beside it? *Default: replace.* Four columns are cramped on a laptop. *(Superseded: the preview was dropped in Phase 11, see there.)*
 -> ANSWER: Replace.
 5. **Nested notebooks (Phase 1).** Should the sidebar show the full folder tree, or only top-level folders? *Default: full tree, and selecting a notebook includes its subfolders.*
 -> Full tree, and selecting a notebook includes it subfolders.

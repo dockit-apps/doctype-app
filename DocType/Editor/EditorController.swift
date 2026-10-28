@@ -38,6 +38,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored var onError: (String) -> Void = { _ in }
     /// Called with a link's destination when it's ⌘-clicked.
     @ObservationIgnored var onOpenLink: (String) -> Void = { _ in }
+    /// The editor's width when images were last sized, and a pending re-size.
+    @ObservationIgnored var lastLayoutWidth: CGFloat = 0
+    @ObservationIgnored var widthChangeTask: Task<Void, Never>?
 
     override init() {
         (scrollView, textView) = MarkdownTextView.makeScrollableEditor()
@@ -49,6 +52,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
         textView.onTaskBoxClick = { [weak self] in self?.toggleTask(at: $0) }
         textView.onLinkClick = { [weak self] in self?.onOpenLink($0) }
+        setUpImages()
     }
 
     func focusText() {
@@ -70,7 +74,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         do {
             let state = DocTypeCore.signposter.beginInterval("Open note")
             defer { DocTypeCore.signposter.endInterval("Open note", state) }
-            let note = await prepare(try await library.read(path))
+            let note = await prepare(try await library.read(path), path: path)
             guard !Task.isCancelled else { return false }
             self.path = path
             show(note, keepingPosition: false)
@@ -89,6 +93,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         tags = []
         lastSyncedText = ""
         isDirty = false
+        styler.imageContext = nil
         if let storage = textView.textStorage {
             styler.replaceDocument(in: storage, text: "", blockMap: BlockMap(), spans: [],
                                    selection: NSRange(location: 0, length: 0))
@@ -158,7 +163,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         case .ignore:
             break
         case .reload:
-            let note = await prepare(diskText)
+            let note = await prepare(diskText, path: path)
             guard path == self.path else { return }
             if isDirty {
                 // You started typing while the new version was being prepared.
@@ -209,7 +214,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
             isDirty = true
             await save()
         case .useDiskVersion:
-            show(await prepare(resolution.finalText), keepingPosition: true)
+            show(await prepare(resolution.finalText, path: path), keepingPosition: true)
         }
     }
 
@@ -222,15 +227,19 @@ final class EditorController: NSObject, NSTextViewDelegate {
         let body: String
         let blockMap: BlockMap
         let spans: [StyleSpan]
+        let images: ImageContext?
     }
 
-    /// Splits off the frontmatter and styles the body off the main thread.
-    private func prepare(_ text: String) async -> PreparedNote {
+    /// Splits off the frontmatter, styles the body and measures its images, all
+    /// off the main thread.
+    private func prepare(_ text: String, path: String) async -> PreparedNote {
         let (frontmatter, body) = Frontmatter.split(text)
         let bodyText = String(body)
         let styled = await MarkdownStyler.styleDocument(bodyText)
+        let images = imageContext(forNote: path)
+        await measureImages(in: styled.spans, context: images)
         return PreparedNote(text: text, frontmatter: frontmatter, body: bodyText,
-                            blockMap: styled.blockMap, spans: styled.spans)
+                            blockMap: styled.blockMap, spans: styled.spans, images: images)
     }
 
     /// Puts a prepared note into the editor without registering undo.
@@ -247,6 +256,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         lastSyncedText = note.text
         isDirty = false
         autosaveTask?.cancel()
+        styler.imageContext = note.images
         if let storage = textView.textStorage {
             styler.replaceDocument(in: storage, text: note.body, blockMap: note.blockMap, spans: note.spans,
                                    selection: selection)

@@ -86,4 +86,26 @@ extension EditorController {
         attributes[.foregroundColor] = inQuote ? NSColor.secondaryLabelColor : NSColor.textColor
         return attributes
     }
+
+    /// No spelling marks on what isn't prose: syntax (hidden or dimmed), bare
+    /// URLs, image paths and code. Link labels are still checked.
+    func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range affectedCharRange: NSRange) -> Int {
+        guard value != 0, let storage = textView.textStorage, NSMaxRange(affectedCharRange) <= storage.length else { return value }
+        var isProse = true
+        storage.enumerateAttributes(in: affectedCharRange) { attributes, run, stop in
+            let font = attributes[.font] as? NSFont
+            let isSyntax = (font?.pointSize ?? EditorTheme.bodyFont.pointSize) < 1
+                || attributes[.foregroundColor] as? NSColor == NSColor.tertiaryLabelColor
+            let isCode = font?.isFixedPitch == true
+            let isBareURL = (attributes[EditorTheme.linkKey] as? String).map { destination in
+                let text = storage.mutableString.substring(with: run)
+                return destination.hasSuffix(text) && (text.contains("://") || text.hasPrefix("www."))
+            } ?? false
+            if isSyntax || isCode || isBareURL || attributes[EditorTheme.imageKey] != nil {
+                isProse = false
+                stop.pointee = true
+            }
+        }
+        return isProse ? value : 0
+    }
 }

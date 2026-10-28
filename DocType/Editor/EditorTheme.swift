@@ -46,12 +46,19 @@ enum EditorTheme {
 
     /// Resets `range` and applies `spans` (which must lie inside it). Markers the
     /// `selection` doesn't reveal are hidden; spans still unconfirmed at the cursor
-    /// (`---` without a space yet) are left out.
+    /// (`---` without a space yet) are left out. Returns image files that need
+    /// measuring before they can be shown (see EditorTheme+Images).
+    @discardableResult
     static func apply(_ spans: [StyleSpan], to text: NSMutableAttributedString, resetting range: NSRange,
-                      selection: NSRange) {
+                      selection: NSRange, images: ImageContext? = nil) -> [URL] {
         text.setAttributes(baseAttributes, range: range)
+        var unmeasuredImages: [URL] = []
         for span in spans where !span.isHeldBack(by: selection) {
             switch span.style {
+            case .image(let source, let width):
+                if let url = applyImage(span, source: source, width: width, to: text, selection: selection, context: images) {
+                    unmeasuredImages.append(url)
+                }
             case .codeBlock:
                 applyCodeBlock(span.range, to: text)
             case .blockquote:
@@ -75,6 +82,8 @@ enum EditorTheme {
             }
         }
         alignTableColumns(spans, in: text)
+        reserveImageSpace(in: range, of: text)
+        return unmeasuredImages
     }
 
     static func attributes(for style: Style) -> [NSAttributedString.Key: Any] {
@@ -101,7 +110,7 @@ enum EditorTheme {
         case .taskBox(let checked):
             // Keeps its width; BlockDecorations draws a checkbox there.
             [.foregroundColor: NSColor.clear, taskKey: checked]
-        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell:
+        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell, .image:
             [:]  // handled in apply(_:to:resetting:selection:)
         }
     }
