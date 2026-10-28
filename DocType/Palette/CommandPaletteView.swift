@@ -57,6 +57,9 @@ struct CommandPaletteView: View {
                             row(item, isSelected: index == selectedIndex)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(item.title)
+                        .accessibilityValue(item.spokenDetail ?? item.detail ?? "")
+                        .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
                         .id(item.id)
                     }
                 }

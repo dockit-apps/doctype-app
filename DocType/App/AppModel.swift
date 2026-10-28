@@ -119,6 +119,7 @@ final class AppModel {
                 PaletteItem(
                     id: command.rawValue, title: command.title,
                     detail: shortcuts.shortcuts(for: command).first?.displayString,
+                    spokenDetail: shortcuts.shortcuts(for: command).first?.spokenString,
                     action: { [weak self] in self?.commands.run(command) }
                 )
             }

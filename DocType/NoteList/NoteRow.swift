@@ -28,7 +28,18 @@ struct NoteRow: View {
             .font(.subheadline)
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
+        // Read as one: "Graphs, 3 of 5 tasks done, edited 28 October 2026, <snippet>".
+        // All in the label: list cells don't pass a separate value on to VoiceOver.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenDescription)
+    }
+
+    private var spokenDescription: String {
+        var parts = [note.title]
+        if note.tasks.total > 0 { parts.append("\(note.tasks.done) of \(note.tasks.total) tasks done") }
+        parts.append("edited \(note.modified.formatted(date: .long, time: .omitted))")
+        if !note.snippet.isEmpty { parts.append(note.snippet) }
+        return parts.joined(separator: ", ")
     }
 }
 

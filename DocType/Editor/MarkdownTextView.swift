@@ -399,6 +399,7 @@ final class MarkdownTextView: NSTextView {
         font = EditorTheme.bodyFont
         textColor = .textColor
         typingAttributes = EditorTheme.baseAttributes
+        setAccessibilityLabel("Note")
         drawsBackground = true
         backgroundColor = .textBackgroundColor
         textContainerInset = NSSize(width: Self.minimumHorizontalInset, height: Self.verticalInset)

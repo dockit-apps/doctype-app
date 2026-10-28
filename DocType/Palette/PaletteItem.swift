@@ -6,6 +6,8 @@ struct PaletteItem: Identifiable {
     let title: String
     /// Shown on the right, e.g. the command's shortcut.
     let detail: String?
+    /// What VoiceOver says for `detail` ("Shift Command P" for ⇧⌘P).
+    var spokenDetail: String? = nil
     let action: () -> Void
 }
 

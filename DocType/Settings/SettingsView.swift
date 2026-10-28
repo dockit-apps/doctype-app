@@ -80,7 +80,8 @@ struct ShortcutSettingsView: View {
                     .frame(minWidth: 110)
             }
             .accessibilityLabel("Shortcut for \(command.title)")
-            .accessibilityValue(current.isEmpty ? "None" : current)
+            .accessibilityValue(isRecording ? "Type shortcut"
+                : settings.shortcuts(for: command).map(\.spokenString).joined(separator: ", ").nonEmpty ?? "None")
             Button {
                 settings.reset(command)
             } label: {

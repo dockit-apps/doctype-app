@@ -34,6 +34,12 @@ struct ShortcutTests {
         #expect(Shortcut.command("s", .control).displayString == "⌃⌘S")
     }
 
+    @Test func spokenStringNamesEveryKey() {
+        #expect(Shortcut.command("p", .shift).spokenString == "Shift Command P")
+        #expect(Shortcut(.returnKey, [.command, .option]).spokenString == "Option Command Return")
+        #expect(Shortcut.command(" ", .control).spokenString == "Control Command Space")
+    }
+
     @Test func characterIsStoredLowercase() {
         #expect(Shortcut.command("P") == Shortcut.command("p"))
     }

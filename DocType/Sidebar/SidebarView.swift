@@ -27,6 +27,7 @@ struct SidebarView: View {
                     ForEach(model.tagCounts, id: \.name) { tag in
                         Label(tag.name, systemImage: "number")
                             .badge(tag.count)
+                            .accessibilityValue(tag.count == 1 ? "1 note" : "\(tag.count) notes")
                             .tag(LibraryIndex.Filter.tag(tag.name))
                     }
                 }

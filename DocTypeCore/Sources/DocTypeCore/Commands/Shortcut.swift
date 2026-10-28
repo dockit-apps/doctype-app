@@ -49,6 +49,23 @@ public struct Shortcut: Hashable, Sendable {
         return result
     }
 
+    /// For VoiceOver, which reads ⌘ and ⇧ badly: "Shift Command P".
+    public var spokenString: String {
+        var words: [String] = []
+        if modifiers.contains(.control) { words.append("Control") }
+        if modifiers.contains(.option) { words.append("Option") }
+        if modifiers.contains(.shift) { words.append("Shift") }
+        if modifiers.contains(.command) { words.append("Command") }
+        switch key {
+        case .character(" "): words.append("Space")
+        case .character("\t"): words.append("Tab")
+        case .character(let character): words.append(character.uppercased())
+        case .delete: words.append("Delete")
+        case .returnKey: words.append("Return")
+        }
+        return words.joined(separator: " ")
+    }
+
     // MARK: - Storage
 
     private static let modifierNames: [(String, Modifiers)] =
