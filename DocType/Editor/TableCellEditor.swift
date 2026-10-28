@@ -15,6 +15,10 @@ final class TableCellEditor: NSTextView {
     /// A key press is typing or deleting, not a paste, drop or Format command:
     /// key presses in a row are one undo step (TableCellSession).
     private(set) var isTyping = false
+    /// The modifier keys of the key press being handled (Shift-Return types a
+    /// line break, Return moves down a row); empty outside one. Not
+    /// NSApp.currentEvent, which can be a different, older event.
+    private(set) var keyModifiers: NSEvent.ModifierFlags = []
 
     static func make() -> TableCellEditor {
         let editor = TableCellEditor(usingTextLayoutManager: true)
@@ -51,6 +55,13 @@ final class TableCellEditor: NSTextView {
         let accepted = super.resignFirstResponder()
         if accepted { onFocusChange(false) }
         return accepted
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let previous = keyModifiers
+        keyModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        defer { keyModifiers = previous }
+        super.keyDown(with: event)
     }
 
     override func insertText(_ string: Any, replacementRange: NSRange) {

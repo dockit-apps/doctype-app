@@ -289,6 +289,25 @@ struct EditorTableTests {
         #expect(editor.textView.selectedRange().location == 6)  // the blank line above the table
     }
 
+    @Test func shiftReturnTypesALineBreakAndReturnMovesDownByTheKeyPressed() async throws {
+        let text = "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cells = editor.tableCells!
+        func returnKey(_ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                             windowNumber: window.windowNumber, context: nil, characters: "\r",
+                             charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        }
+
+        #expect(cells.begin(cellAt: cell("1", in: editor), placing: .end))
+        cells.editor.keyDown(with: returnKey(.shift))
+        #expect(editor.textView.string.contains("| 1<br> | 2 |"))
+        #expect(cells.cellLocation == cell("1<br>", in: editor))
+        cells.editor.keyDown(with: returnKey([]))  // the Shift is the key press's, not an earlier event's
+        #expect(cells.cellLocation == cell("3", in: editor))
+    }
+
     @Test func tabAndReturnMoveThroughCellsAndAddRows() async throws {
         let text = "| A | B |\n| --- | --- |\n| 1 | 2 |"
         let (editor, folder, _) = try await editor(showing: text)

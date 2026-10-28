@@ -24,7 +24,7 @@ extension TableCellSession {
             return move(.tab)
         case #selector(NSResponder.insertBacktab(_:)):
             return move(.backtab)
-        case #selector(NSResponder.insertNewline(_:)) where NSApp.currentEvent?.modifierFlags.contains(.shift) != true:
+        case #selector(NSResponder.insertNewline(_:)) where !editor.keyModifiers.contains(.shift):
             return move(.newline)
         case #selector(NSResponder.cancelOperation(_:)):
             return move(.down, leavingTable: true)
