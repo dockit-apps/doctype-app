@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how DocType is put together. It grows with each phase of [docs/PLAN.md](docs/PLAN.md).
+This document explains how DocType is put together: its layers, the two main data flows, the editor's pieces, the measured performance and the known limits. The decisions behind them, phase by phase, are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Layers
 
@@ -8,7 +8,7 @@ This document explains how DocType is put together. It grows with each phase of 
 |---|---|---|---|
 | **Core** | `DocTypeCore/` (Swift package) | The rules: notes and frontmatter, the library on disk and its in-memory index, markdown styling decisions, text transforms, commands, search. Unit-tested. | Foundation, CoreServices, os, swift-markdown |
 | **App models** | `DocType/App`, `DocType/Editor` controllers | Wire core to AppKit/SwiftUI and hold UI state (selection, open note, autosave). | SwiftUI, AppKit, DocTypeCore |
-| **Views** | `DocType/*View.swift` | Lay out state and forward user actions to models. No logic. | SwiftUI, AppKit |
+| **Views** | `DocType/**/…View.swift`, `NoteRow`, `SettingsView` | Lay out state and forward user actions to models. No logic. | SwiftUI, AppKit |
 
 Core never imports SwiftUI or AppKit, so it can later power a headless MCP server.
 Check: `grep -rE "import (SwiftUI|AppKit)" DocTypeCore/Sources` must print nothing.
@@ -52,6 +52,76 @@ Later, MCP tools and `doctype://` URLs will call the same core functions with ex
 2. **Build.** The compiler stops at the `info` switch in the same file. Add the title, the menu it belongs to, and the default shortcut(s), or none. The first shortcut is shown in the menu; any others also trigger the command.
 3. **Build again.** The compiler now stops at `run` and `isEnabled` in `DocType/App/CommandRunner.swift`. Add the behavior and when it's available. If the behavior is more than a line or two of wiring, put the logic in core (a `Library` method or a pure function) and call it from here.
 4. That's all. The menu item, its shortcut and the palette entry are generated. `swift test` checks that no two commands share a shortcut and that none is one macOS reserves (`ShortcutMap.reserved`). The command also appears in Settings ▸ Shortcuts, where it can be rebound.
+
+## The editor
+
+One `NSTextView` on TextKit 2 (`MarkdownTextView`) shows the note's body. The frontmatter is kept by `EditorController`, shown as tags above the text, and joined back on save. `EditorController` is split by concern into extension files: editing keys, tags, images, attachments, tables and external changes.
+
+- **Hidden syntax.** Markdown stays in the text. Markers the cursor isn't on are drawn with no size (see the keystroke flow above). The text column is at most 70 digit widths and centered.
+- **Decorations.** `BlockDecorations` returns a custom layout fragment for each paragraph that needs drawing: code boxes, quote bars, rules, bullets, checkboxes, images and table rows.
+- **Images** are measured from file headers before a note appears. Their thumbnails are decoded downsampled off the main thread into a 64 MB cache (`ImageStore`). Width is stored as `![alt|300](path)`.
+- **Tables.** A table's Markdown stays in the note, hidden. `EditorTheme+Tables` lays out each row: wrapped cells, `<br>` as a line break, every row as tall as its tallest cell. `BlockDecorations+Tables` draws the rows. The cell being edited gets a real text view laid over it (`TableCellSession`, `TableCellEditor`), and every keystroke there is written straight into the note (`TableCellText` maps `<br>` and `\|` both ways). The note's own cursor never stays in a table: arriving there opens the cell.
+- **Read-only notes.** A file that isn't UTF-8 is decoded anyway (`NoteText`), shown, and never saved, so its encoding is never changed.
+
+## Undo
+
+The note has one undo history, the window's `UndoManager`.
+- Typing in the note uses NSTextView's own undo.
+- Typing in a table cell registers steps on the same history, grouped like typing (`TableCellSession`). The cell editor has no undo of its own.
+- Commands apply core `TextEdit`s through `EditorController.apply`, one step each.
+- Tag changes register their own steps.
+
+Two AppKit details shape this:
+- **⌘Z goes to the window.** NSTextView doesn't handle `undo:`; NSWindow does, with the window's undo manager.
+- **Some undos are silent.** NSTextView undoes an edit made in code without calling `textDidChange` and without moving the cursor. `EditorController.noteDidUndoOrRedo` therefore finishes any change an undo leaves unstyled: it restyles, marks the note for autosave, and puts the cursor at the change.
+
+Before each undo or redo, an open table cell closes. Afterwards, the cell where the change landed opens.
+
+## The library on disk
+
+- **`Library`** is an actor and the only code that touches files. It owns an in-memory `LibraryIndex` (summaries, notebook tree, tags, folded search text) and publishes a new snapshot after every change. There's no persistent index; a scan of 1,000 notes takes about 0.1–0.3 s.
+- **`FolderWatcher`** (FSEvents, ignoring our own writes) batches outside changes, and the library re-reads only what changed.
+- **External changes to the open note** go through `ExternalChangePolicy`: reload when there are no unsaved edits, the banner when there are. Whichever version you give up is saved as `<name> (conflict <date>).md`.
+- **Writes are atomic** (a temp file, then a rename), so a crash never leaves half a note.
+
+## Settings
+
+`Settings` (⌘,) has one pane, Shortcuts. Core `ShortcutMap` holds the user's changes over each command's defaults: it refuses a shortcut that's in use or reserved by macOS, and stores the changes as plain strings. `ShortcutSettings` keeps them in UserDefaults and records new ones from key presses.
+
+## Performance
+
+These are the three budgets from the plan. Measured on 2026-10-28 on the developer's Mac, using a release build and the 1,000-note fixture library (`Scripts/make-fixtures.swift`):
+
+| Budget | Measured | How |
+|---|---|---|
+| Launch to an editable note under 1 s | 385–545 ms, ordinary note or the 5,000-line note | `LaunchTimer` log line (`log show --predicate 'subsystem == "io.github.dockit-apps.doctype" AND category == "launch"'`), 10 warm launches. Cold launches (after `sudo purge`) not measured. |
+| No file I/O on the main thread | none | `Library` has DEBUG `dispatchPrecondition`s on every read and write. Switching through 40 notes under lldb never trips them. |
+| Smooth typing in a 5,000-line note | per keystroke 0.07 ms median, 0.8 ms worst (budget 1 / 8 ms) | `PerformanceTests` in release (`swift test -c release`). |
+
+Other measurements:
+- Styling the whole 5,000-line note when it opens: 63 ms.
+- Search per keystroke: 2 ms at worst (budget 50 ms).
+- Library scan: 120 ms warm, about 210 ms on a cold first run (budget 500 ms).
+- Typing in a 1,000-line code block: about 1 ms per keystroke.
+- A 300-row table: about 29 ms per keystroke in a *debug* build. Normal tables take a few ms.
+- Idle: 0–0.7% CPU and about 95 MB of memory in a debug build after switching through 40 notes.
+
+## Known limitations
+
+- Find (⌘F) finds and replaces text in tables, but its match highlights don't show inside a table.
+- A mouse selection dragged from the text through a table isn't highlighted inside the table. Copying it still copies the Markdown.
+- In a narrow column, showing a cell's `**` markers on the cursor's line can wrap that line, so the row grows while you edit it.
+- Bare URLs are links in the editor, through DocType's own detector (`BareURL`), because swift-markdown has no GFM autolink extension.
+- One app test, `thumbnailsAreDecodedSmall`, failed now and then in earlier runs (waiting for a thumbnail). It passed all 50 repeated runs in the last audit. The cause wasn't found.
+
+## Pitfalls we hit
+
+- **Attributes during an edit.** Changing attributes inside `willProcessEditing` makes TextKit 2 move the cursor. Styling happens after the edit, as a separate attribute-only edit.
+- **TextKit 1 fallback.** Touching `NSTextView.layoutManager` silently switches the view to TextKit 1. DEBUG builds assert on it.
+- **Objective-C exceptions.** They crash at once (`NSApplicationCrashOnExceptions`) instead of leaving Swift concurrency in a broken state.
+- **Undo groups in tests.** In app tests, the run loop may not end an undo group between "key presses" while other tests run. Tests that check undo steps group them by hand (`EditorTableTests.groupUndoByHand`).
+- **Key modifiers.** `NSApp.currentEvent` can be an older event. The table cell editor reads modifier keys from the key press it is handling.
+- **`log` in zsh.** In zsh, `log` is a shell builtin. Use `/usr/bin/log show` to read the app's log.
 
 ## Planned extension points
 
