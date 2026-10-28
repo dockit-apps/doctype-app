@@ -49,7 +49,8 @@ final class ShortcutSettings {
         change { $0.resetAll() } describing: { _ in "" }
     }
 
-    /// Applies `edit` to the map and saves it; a refusal leaves everything as it was.
+    /// Applies `edit` to the map and saves it; a refusal leaves everything as it
+    /// was and plays the alert sound.
     private func change(_ edit: (inout ShortcutMap) throws -> Void,
                         describing describe: (ShortcutMap.Refusal) -> String) {
         var changed = map
@@ -57,6 +58,7 @@ final class ShortcutSettings {
             try edit(&changed)
         } catch {
             message = (error as? ShortcutMap.Refusal).map(describe)
+            NSSound.beep()  // the system alert sound: a refusal is heard, not only shown
             return
         }
         message = nil
