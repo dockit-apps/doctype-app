@@ -185,6 +185,74 @@ public enum TableEditing {
         return TextEdit(range: table.range, replacement: replacement, selectionAfter: NSRange(location: cursor, length: 0))
     }
 
+    // MARK: - Where the cursor may be
+
+    /// Where the cursor goes instead of `location` (moved there from `previous`)
+    /// in a table, or nil to leave it. Typing at these spots would break the table:
+    /// - the hidden `|---|` row is skipped (see caretSkippingDelimiterRow);
+    /// - outside a row's outer pipes (left of it, or End / right of it) the cursor
+    ///   snaps into the first or last cell, since the pipes are invisible;
+    /// - from a cell's outer edge, ← / → once more leave the row.
+    public static func adjustedCaret(_ location: Int, from previous: Int, in text: NSString,
+                                     blockMap: BlockMap) -> Int? {
+        if let skipped = caretSkippingDelimiterRow(location, from: previous, in: text, blockMap: blockMap) { return skipped }
+        guard let edge = rowEdge(location, from: previous, in: text, blockMap: blockMap) else { return nil }
+        guard let leave = edge.leave else { return edge.snap }
+        // Leaving the row: the spot reached may be in the table too.
+        return caretSkippingDelimiterRow(leave, from: previous, in: text, blockMap: blockMap)
+            ?? rowEdge(leave, from: leave, in: text, blockMap: blockMap)?.snap ?? leave
+    }
+
+    /// For a cursor outside a table row's outer pipes: the cell edge to snap to,
+    /// and where to go instead when ← / → is pressed at that edge (to leave the row).
+    private static func rowEdge(_ location: Int, from previous: Int, in text: NSString,
+                                blockMap: BlockMap) -> (snap: Int, leave: Int?)? {
+        guard location <= text.length else { return nil }
+        let line = lineContaining(location, in: text)
+        let (cells, pipes) = TableRowParsing.cells(in: line, of: text)
+        guard let first = cells.first, let last = cells.last, let firstPipe = pipes.first, let lastPipe = pipes.last,
+              let table = table(at: location, in: text, blockMap: blockMap), table.lines[1] != line else { return nil }
+        let start = contentRange(of: first, in: text).location
+        let end = contentRange(of: last, in: text).upperBound
+        let previousOnLine = previous >= line.location && previous <= line.upperBound
+        if firstPipe < first.location, location <= firstPipe {
+            let atEdge = previousOnLine && previous > firstPipe && previous <= start && location < previous
+            let above = line.location > 0 ? lineContaining(line.location - 1, in: text).upperBound : nil
+            return (start, atEdge ? above : nil)
+        }
+        if lastPipe >= last.upperBound, location > lastPipe {
+            let atEdge = previousOnLine && previous >= end && previous <= lastPipe && location > previous
+            var lineEnd = 0
+            text.getLineStart(nil, end: &lineEnd, contentsEnd: nil, for: line)
+            return (end, atEdge && lineEnd > line.upperBound ? lineEnd : nil)
+        }
+        return nil
+    }
+
+    /// Where the cursor goes instead of `location` when that's on a table's
+    /// hidden `|---|` row: on to the same column of the first body row when
+    /// moving down or right from `previous`, back to the header when moving up
+    /// or left. Nil when `location` isn't on such a row.
+    static func caretSkippingDelimiterRow(_ location: Int, from previous: Int, in text: NSString,
+                                                 blockMap: BlockMap) -> Int? {
+        guard location <= text.length else { return nil }
+        let line = lineContaining(location, in: text)
+        guard isDelimiterRow(line, in: text),
+              let table = table(at: location, in: text, blockMap: blockMap), table.lines[1] == line,
+              let (_, column) = table.position(of: location) else { return nil }
+        let isMovingDown = location >= previous
+        if isMovingDown, table.lines.count == 2 {
+            // No body rows: on to the line after the table, if there is one.
+            var lineEnd = 0
+            text.getLineStart(nil, end: &lineEnd, contentsEnd: nil, for: line)
+            if lineEnd > line.upperBound { return lineEnd }
+        }
+        let row = isMovingDown && table.lines.count > 2 ? 2 : 0
+        let cells = table.cells[row]
+        guard !cells.isEmpty else { return table.lines[row].upperBound }
+        return contentRange(of: cells[min(column, cells.count - 1)], in: text).upperBound
+    }
+
     // MARK: - Tab and Return
 
     /// Tab: select the next cell's text (Shift-Tab: the previous one), adding a
@@ -229,6 +297,19 @@ public enum TableEditing {
         let target = cells.isEmpty ? NSRange(location: table.lines[nextRow].location, length: 0)
             : contentRange(of: cells[min(column, cells.count - 1)], in: text)
         return moveSelection(from: selection, to: NSRange(location: target.upperBound, length: 0))
+    }
+
+    /// Backspace right after a cell's pipe (Delete right before one) would merge
+    /// two cells or break the row, since the pipes are invisible: in a table it
+    /// does nothing (a no-change edit). Nil everywhere else.
+    public static func editForDelete(forward: Bool, in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
+        guard selection.length == 0 else { return nil }
+        let target = forward ? selection.location : selection.location - 1
+        guard target >= 0, target < text.length, text.character(at: target) == 124,  // "|"
+              table(at: selection.location, in: text, blockMap: blockMap) != nil,
+              TableRowParsing.cells(in: lineContaining(target, in: text), of: text).pipes.contains(target)
+        else { return nil }
+        return moveSelection(from: selection, to: selection)
     }
 
     /// An edit that changes nothing but the selection.

@@ -20,6 +20,8 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     private var isReplacingDocument = false
     /// Range edited but not yet restyled (applied after the edit, or after composing).
     private var pendingRange: NSRange?
+    /// The text changed and the block map isn't caught up yet.
+    var hasPendingEdits: Bool { pendingRange != nil }
     /// The selection the current styles were applied for (markers on its lines are shown).
     private var styledSelection = NSRange(location: 0, length: 0)
     /// How to find the open note's images; nil shows image syntax as text.

@@ -127,10 +127,10 @@ struct InlineStylingTests {
             return "\(index)\(isLast ? "!" : ""):\(text.substring(with: span.range))"
         }
         #expect(rows == ["0:| a | b |", "1:|---|---|", "2!:| 1 | 2 |"])
-        // The delimiter row is syntax, shown only while the cursor is on it.
-        let delimiter = spans.first { $0.style == .syntaxMarker }
+        // The delimiter row is never shown (the cursor skips it).
+        let delimiter = spans.first { $0.style == .hiddenMarker }
         #expect(delimiter.map { text.substring(with: $0.range) } == "|---|---|")
-        #expect(delimiter?.revealRange == NSRange(location: 10, length: 9))
+        #expect(!spans.contains { $0.style == .syntaxMarker })
     }
 
     private func cells(_ text: String) -> [String] {

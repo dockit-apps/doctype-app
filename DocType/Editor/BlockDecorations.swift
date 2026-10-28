@@ -127,7 +127,9 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
     }
 
     override var renderingSurfaceBounds: CGRect {
-        let bounds = imageFrames.reduce(super.renderingSurfaceBounds.union(fullWidth)) { $0.union($1.frame.insetBy(dx: -4, dy: -4)) }
+        var bounds = imageFrames.reduce(super.renderingSurfaceBounds.union(fullWidth)) { $0.union($1.frame.insetBy(dx: -4, dy: -4)) }
+        // A note's last row draws its grid below the fragment (see tableRowBottom).
+        if let row = decorations.tableRow { bounds.size.height = max(bounds.height, tableRowBottom(row) + 1) }
         return tableButtons.reduce(bounds) { $0.union($1.frame.insetBy(dx: -2, dy: -2)) }
     }
 

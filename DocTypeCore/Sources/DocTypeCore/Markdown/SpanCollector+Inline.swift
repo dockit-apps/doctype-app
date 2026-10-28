@@ -140,8 +140,9 @@ extension SpanCollector {
     // MARK: - Tables
 
     /// Tables look like tables: the editor draws a grid over the (invisible) pipes,
-    /// the header row is bold, and the `|---|` row is hidden except while the
-    /// cursor is on it. Every cell gets a `.tableCell` span so the editor can
+    /// the header row is bold, and the `|---|` row is always hidden (the cursor
+    /// skips it, see TableEditing.caretSkippingDelimiterRow; alignment is set
+    /// with the table commands). Every cell gets a `.tableCell` span so the editor can
     /// line the columns up, and every row a `.tableRow` span for the grid.
     mutating func visitTable(_ table: Table) {
         defer { descendInto(table) }
@@ -168,7 +169,7 @@ extension SpanCollector {
             let (cells, pipes) = TableRowParsing.cells(in: line, of: source)
             containerSpans.append(StyleSpan(shifted(line), .tableRow(index: index, isLast: index == lines.count - 1),
                                             revealRange: shifted(tableRange)))
-            if index == 1 { marker(line) }  // the |---|---| delimiter row
+            if index == 1 { hidden(line) }  // the |---|---| delimiter row: never shown
             for pipe in pipes { markerSpans.append(StyleSpan(shifted(NSRange(location: pipe, length: 1)), .tablePipe)) }
             for (column, cell) in cells.enumerated() {
                 let alignment = column < alignments.count ? alignments[column] : .left

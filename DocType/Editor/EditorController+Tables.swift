@@ -22,6 +22,17 @@ extension EditorController {
         apply(TableEditing.insertTable(in: text, selection: textView.selectedRange()))
     }
 
+    /// Keeps the cursor where typing can't break a table: off the hidden `|---|`
+    /// row and inside the outer pipes (see TableEditing.adjustedCaret).
+    func selectionInTableCells(from oldRange: NSRange, to newRange: NSRange) -> NSRange {
+        // Mid-edit the block map isn't updated yet; typing doesn't land there anyway.
+        guard newRange.length == 0, !styler.hasPendingEdits, let text = textView.textStorage?.mutableString,
+              let location = TableEditing.adjustedCaret(newRange.location, from: oldRange.location,
+                                                                    in: text, blockMap: styler.blockMap)
+        else { return newRange }
+        return NSRange(location: location, length: 0)
+    }
+
     func isInTable(at location: Int) -> Bool {
         guard let text = textView.textStorage?.mutableString else { return false }
         return TableEditing.table(at: location, in: text, blockMap: styler.blockMap) != nil

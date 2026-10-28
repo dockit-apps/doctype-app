@@ -30,8 +30,11 @@ extension EditorController {
                 ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.deleteBackward(_:)):
-            ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+            TableEditing.editForDelete(forward: false, in: text, selection: selection, blockMap: styler.blockMap)
+                ?? ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+        case #selector(NSResponder.deleteForward(_:)):
+            TableEditing.editForDelete(forward: true, in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertTab(_:)):
             TableEditing.editForTab(forward: true, in: text, selection: selection, blockMap: styler.blockMap)
                 ?? ListIndentation.edit(.indent, in: text, selection: selection, blockMap: styler.blockMap)
@@ -75,7 +78,8 @@ extension EditorController {
     ) -> NSRange {
         guard let text = textView.textStorage?.mutableString else { return newRange }
         let outOfQuote = QuoteEditing.adjustedSelection(from: oldRange, to: newRange, in: text, blockMap: styler.blockMap)
-        return ListContinuation.adjustedSelection(from: oldRange, to: outOfQuote, in: text, blockMap: styler.blockMap)
+        let adjusted = ListContinuation.adjustedSelection(from: oldRange, to: outOfQuote, in: text, blockMap: styler.blockMap)
+        return selectionInTableCells(from: oldRange, to: adjusted)
     }
 
     /// Right after hidden syntax, NSTextView would copy its zero-size font into the

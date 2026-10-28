@@ -404,6 +404,43 @@ struct EditorRichContentTests {
         _ = window
     }
 
+    /// The report: arrow keys stopped on the hidden `|---|` row, which showed
+    /// its dashes, and typing there broke the table.
+    @Test func arrowKeysSkipTheHiddenDelimiterRow() async throws {
+        let text = "| Name | Grade |\n| --- | --- |\n| Al | 1 |"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        let string = text as NSString
+        let delimiter = string.range(of: "| --- | --- |")
+
+        textView.setSelectedRange(NSRange(location: string.range(of: "Al").upperBound, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
+        #expect(!NSLocationInRange(textView.selectedRange().location, delimiter))
+        #expect(textView.selectedRange().location < delimiter.location)  // in the header
+        textView.doCommand(by: #selector(NSResponder.moveDown(_:)))
+        #expect(textView.selectedRange().location > delimiter.upperBound)  // in the body
+        textView.setSelectedRange(NSRange(location: string.range(of: "Grade").upperBound, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveRight(_:)))
+        textView.doCommand(by: #selector(NSResponder.moveRight(_:)))
+        #expect(!NSLocationInRange(textView.selectedRange().location, delimiter))
+
+        // End / Home stop inside the outer pipes, so typing stays in a cell.
+        textView.setSelectedRange(NSRange(location: string.range(of: "Al").location + 1, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveToEndOfLine(_:)))
+        textView.insertText("0", replacementRange: textView.selectedRange())
+        textView.doCommand(by: #selector(NSResponder.moveToBeginningOfLine(_:)))
+        textView.insertText("Dr ", replacementRange: textView.selectedRange())
+        #expect(textView.string == "| Name | Grade |\n| --- | --- |\n| Dr Al | 10 |")
+
+        // And it stays collapsed wherever the cursor is.
+        layOut(textView)
+        let height = textView.firstRect(forCharacterRange: NSRange(location: delimiter.location + 2, length: 1),
+                                        actualRange: nil).height
+        #expect(height < 1)
+        _ = window
+    }
+
     /// A table at the very end of a note: its last row's "+" button is below
     /// the text, where TextKit leaves no room of its own.
     @Test func theAddRowButtonWorksAtTheEndOfANote() async throws {

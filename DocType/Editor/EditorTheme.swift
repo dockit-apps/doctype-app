@@ -146,15 +146,13 @@ enum EditorTheme {
     nonisolated static let tableButtonSpace: CGFloat = 20
 
     /// Marks a table row's line and pads it. The `|---|` row collapses to almost
-    /// nothing while it's hidden (its line break is hidden too).
+    /// nothing (its line break is hidden too).
     private static func applyTableRow(_ span: StyleSpan, index: Int, isLast: Bool, to text: NSMutableAttributedString,
                                       selection: NSRange) {
         let paragraph = text.mutableString.paragraphRange(for: NSRange(location: span.range.location, length: 0))
         let isActive = span.isRevealed(by: selection)
         let style = NSMutableParagraphStyle()
-        let isHiddenDelimiter = index == 1
-            && !(selection.location <= span.range.upperBound && selection.upperBound >= span.range.location)
-        if isHiddenDelimiter {
+        if index == 1 {  // the |---| row, always hidden
             text.addAttributes(concealedAttributes, range: paragraph)
             style.maximumLineHeight = 1
         } else {

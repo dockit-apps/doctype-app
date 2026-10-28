@@ -140,4 +140,77 @@ struct TableEditingTests {
         #expect(show(TableEditing.insertTable(in: spaced, selection: blank), on: spaced)
                 == "above\n\n| [[Column 1]] | Column 2 |\n| --- | --- |\n|  |  |\n\nbelow")
     }
+
+    // MARK: The hidden |---| row
+
+    /// Where the cursor goes when moved from `previous` to `location`, as "^".
+    private func skip(_ text: String, to location: Int, from previous: Int) -> String? {
+        let string = text as NSString
+        guard let moved = TableEditing.adjustedCaret(location, from: previous, in: string,
+                                                                 blockMap: BlockMap(text: string)) else { return nil }
+        return string.replacingCharacters(in: NSRange(location: moved, length: 0), with: "^")
+    }
+
+    @Test func theCursorSkipsTheDelimiterRow() {
+        let text = "| Name | Grade |\n| --- | --- |\n| Al | 1 |\n\nend"
+        let delimiterColumn2 = 24, header = 2, body = 34
+        // Down (or right) onto it: on to the same column of the first body row.
+        #expect(skip(text, to: delimiterColumn2, from: 10) == "| Name | Grade |\n| --- | --- |\n| Al | 1^ |\n\nend")
+        #expect(skip(text, to: 17, from: 16) == "| Name | Grade |\n| --- | --- |\n| Al^ | 1 |\n\nend")
+        // Up (or left) onto it: back to the header.
+        #expect(skip(text, to: delimiterColumn2, from: body) == "| Name | Grade^ |\n| --- | --- |\n| Al | 1 |\n\nend")
+        #expect(skip(text, to: 18, from: header + 30) == "| Name^ | Grade |\n| --- | --- |\n| Al | 1 |\n\nend")
+        // Anywhere else: nothing to do.
+        #expect(skip(text, to: header, from: 0) == nil)
+        #expect(skip(text, to: body, from: 0) == nil)
+        #expect(skip("a\n| --- | --- |", to: 5, from: 0) == nil)  // not a table
+    }
+
+    @Test func outsideTheOuterPipesTheCursorSnapsIntoACell() {
+        let text = "| Name | Grade |\n| --- | --- |\n| Al | 1 |"
+        let bodyStart = 31, bodyEnd = 41
+        // A click left or right of a row (or End): into the first / last cell.
+        #expect(skip(text, to: bodyStart, from: 3) == "| Name | Grade |\n| --- | --- |\n| ^Al | 1 |")
+        #expect(skip(text, to: bodyEnd, from: 3) == "| Name | Grade |\n| --- | --- |\n| Al | 1^ |")
+        #expect(skip(text, to: 16, from: 36) == "| Name | Grade^ |\n| --- | --- |\n| Al | 1 |")
+        #expect(skip("| a |  |\n|---|---|", to: 8, from: 2) == "| a | ^ |\n|---|---|")  // an empty cell: after its first space
+        // Inside the pipes nothing changes.
+        #expect(skip(text, to: bodyStart + 1, from: 3) == nil)
+        #expect(skip(text, to: bodyEnd - 1, from: 3) == nil)
+    }
+
+    @Test func fromACellsOuterEdgeArrowsLeaveTheRow() {
+        let text = "before\n| a | b |\n|---|---|\n| 1 | 2 |\nafter"
+        // ← from the header's first cell: up to the line above.
+        #expect(skip(text, to: 7, from: 9) == "before^\n| a | b |\n|---|---|\n| 1 | 2 |\nafter")
+        // → from the last row's last cell: down to the line below.
+        #expect(skip(text, to: 36, from: 35) == "before\n| a | b |\n|---|---|\n| 1 | 2 |\n^after")
+        // → from the header's last cell: past the hidden row into the body.
+        #expect(skip(text, to: 16, from: 15) == "before\n| a | b |\n|---|---|\n| 1^ | 2 |\nafter")
+        // ← from the body's first cell: back over the hidden row to the header's end.
+        #expect(skip(text, to: 27, from: 29) == "before\n| a | b^ |\n|---|---|\n| 1 | 2 |\nafter")
+    }
+
+    @Test func withoutBodyRowsTheCursorLeavesTheTableDownwards() {
+        #expect(skip("| A |\n|---|\nnext", to: 8, from: 2) == "| A |\n|---|\n^next")
+        #expect(skip("| A |\n|---|", to: 8, from: 2) == "| A^ |\n|---|")  // nowhere below: the header
+    }
+
+    @Test func backspaceAndDeleteDontRemoveThePipes() {
+        let text = "| a | b |\n|---|---|\n| 1 | 2 |" as NSString
+        let map = BlockMap(text: text)
+        func blocked(_ location: Int, forward: Bool) -> Bool {
+            let edit = TableEditing.editForDelete(forward: forward, in: text, selection: NSRange(location: location, length: 0), blockMap: map)
+            if let edit { #expect(edit.isNoChange) }
+            return edit != nil
+        }
+        #expect(blocked(5, forward: false))   // after the pipe between "a" and "b"
+        #expect(blocked(4, forward: true))    // before it
+        #expect(blocked(1, forward: false))   // after the row's first pipe
+        #expect(!blocked(3, forward: false))  // deleting "a" is fine
+        #expect(!blocked(7, forward: true))
+        let plain = "a | b" as NSString
+        #expect(TableEditing.editForDelete(forward: false, in: plain, selection: NSRange(location: 3, length: 0),
+                                           blockMap: BlockMap(text: plain)) == nil)  // not a table
+    }
 }
