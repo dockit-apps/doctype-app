@@ -19,10 +19,10 @@ import DocTypeCore
 
 final class TableCellSession: NSObject, NSTextViewDelegate {
     let editor = TableCellEditor.make()
-    private unowned let owner: EditorController
+    unowned let owner: EditorController
 
     /// The cell being edited.
-    private struct EditingCell {
+    struct EditingCell {
         /// Where the cell starts in the note (just after its opening pipe). It
         /// stays put while its text changes.
         let location: Int
@@ -32,7 +32,7 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         let isHeader: Bool
         let alignment: TableAlignment
     }
-    private var cell: EditingCell?
+    private(set) var cell: EditingCell?
 
     /// Typing in the cell that one ⌘Z undoes (a step of the note's undo).
     private final class TypingStep {
@@ -78,7 +78,7 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         }
     }
 
-    private var textView: MarkdownTextView { owner.textView }
+    var textView: MarkdownTextView { owner.textView }
 
     // MARK: - Opening and closing a cell
 
@@ -272,173 +272,5 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         restyleEditor()  // markdown markers show on the cursor's line
-    }
-
-    /// Next to hidden markers, NSTextView would copy their zero-size font into
-    /// the typing attributes; use the cell's look instead.
-    func textView(_ textView: NSTextView, shouldChangeTypingAttributes oldTypingAttributes: [String: Any],
-                  toAttributes newTypingAttributes: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
-        guard let font = newTypingAttributes[.font] as? NSFont, font.pointSize < 1 else { return newTypingAttributes }
-        return typingAttributes
-    }
-
-    private var typingAttributes: [NSAttributedString.Key: Any] {
-        var attributes = EditorTheme.baseAttributes
-        attributes[.paragraphStyle] = EditorTheme.cellParagraphStyle(cell?.alignment ?? .left)
-        if cell?.isHeader == true {
-            attributes[.font] = NSFontManager.shared.convert(EditorTheme.bodyFont, toHaveTrait: .boldFontMask)
-        }
-        return attributes
-    }
-
-    /// Styles the cell's text like the note: as GitHub would show it in this
-    /// cell (bold header, inline styles), with markdown markers dimmed on the
-    /// cursor's line and hidden elsewhere.
-    private func restyleEditor() {
-        guard let cell, !editor.hasMarkedText(), let storage = editor.textStorage else { return }
-        let markdown = cell.text.markdown as NSString
-        // The cell inside a table of its own, so it's parsed as a cell, nothing else.
-        let prefix = cell.isHeader ? "| " : "| x |\n| --- |\n| "
-        let suffix = cell.isHeader ? " |\n| --- |" : " |"
-        let table = (prefix + (markdown as String) + suffix) as NSString
-        let offset = (prefix as NSString).length
-        let inTable = NSRange(location: offset, length: markdown.length)
-        let shown = editor.string as NSString
-        var spans: [StyleSpan] = []
-        for span in MarkdownStyler.spans(in: table, blocks: BlockMap(text: table).blocks) {
-            switch span.style {
-            case .strong, .emphasis, .strikethrough, .inlineCode, .link, .syntaxMarker: break
-            default: continue
-            }
-            let clipped = NSIntersectionRange(span.range, inTable)
-            guard clipped.length > 0 else { continue }
-            let range = cell.text.editorRange(forMarkdownRange: NSRange(location: clipped.location - offset, length: clipped.length))
-            guard range.length > 0, NSMaxRange(range) <= shown.length else { continue }
-            var reveal: NSRange?
-            if span.style == .syntaxMarker {
-                var start = 0, end = 0
-                shown.getLineStart(&start, end: nil, contentsEnd: &end, for: NSRange(location: range.location, length: 0))
-                reveal = NSRange(location: start, length: end - start)
-            }
-            spans.append(StyleSpan(range, span.style, revealRange: reveal))
-        }
-        let whole = NSRange(location: 0, length: shown.length)
-        let restyle = {
-            storage.beginEditing()
-            EditorTheme.apply(spans, to: storage, resetting: whole, selection: self.editor.selectedRange())
-            storage.addAttribute(.paragraphStyle, value: EditorTheme.cellParagraphStyle(cell.alignment), range: whole)
-            storage.endEditing()
-        }
-        if let content = editor.textContentStorage { content.performEditingTransaction(restyle) } else { restyle() }
-        editor.typingAttributes = typingAttributes
-    }
-
-    /// Runs a Format menu transform on the cell's text (one undo step).
-    func format(_ transform: (NSString, NSRange) -> TextEdit) {
-        guard let storage = editor.textStorage else { return }
-        let edit = transform(storage.mutableString, editor.selectedRange())
-        guard !edit.isNoChange else {
-            editor.setSelectedRange(edit.selectionAfter)
-            return
-        }
-        guard editor.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
-        storage.replaceCharacters(in: edit.range, with: edit.replacement)
-        editor.setSelectedRange(edit.selectionAfter)
-        editor.didChangeText()
-    }
-
-    // MARK: - Moving between cells
-
-    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        guard textView === editor, cell != nil, !editor.hasMarkedText() else { return false }
-        let selection = editor.selectedRange()
-        let isCursor = selection.length == 0
-        let length = (editor.string as NSString).length
-        switch selector {
-        case #selector(NSResponder.moveLeft(_:)) where isCursor && selection.location == 0:
-            return move(.left)
-        case #selector(NSResponder.moveRight(_:)) where isCursor && selection.location == length:
-            return move(.right)
-        case #selector(NSResponder.moveUp(_:)) where isCursor && editor.isCaretOnFirstLine:
-            return move(.up)
-        case #selector(NSResponder.moveDown(_:)) where isCursor && editor.isCaretOnLastLine:
-            return move(.down)
-        case #selector(NSResponder.insertTab(_:)):
-            return move(.tab)
-        case #selector(NSResponder.insertBacktab(_:)):
-            return move(.backtab)
-        case #selector(NSResponder.insertNewline(_:)) where NSApp.currentEvent?.modifierFlags.contains(.shift) != true:
-            return move(.newline)
-        case #selector(NSResponder.cancelOperation(_:)):
-            return move(.down, leavingTable: true)
-        default:
-            return false  // Shift-Return and Option-Return type a line break
-        }
-    }
-
-    /// Goes where `key` leads from the cell being edited.
-    @discardableResult
-    func move(_ key: TableEditing.CellKey, leavingTable: Bool = false) -> Bool {
-        guard let cell, let storage = textView.textStorage else { return false }
-        let text = storage.mutableString
-        guard let table = TableEditing.table(at: cell.location, in: text, blockMap: owner.styler.blockMap),
-              let (row, column) = table.position(of: cell.location) else { return false }
-        if leavingTable {
-            leave(table, above: false)
-            return true
-        }
-        let caretX = textView.convert(NSPoint(x: editor.caretRect.midX, y: 0), from: editor).x
-        switch TableEditing.target(of: key, fromRow: row, column: column, in: table, text: text) {
-        case .cell(let targetRow, let targetColumn):
-            let placement: Placement = switch key {
-            case .left, .newline: .end
-            case .right: .start
-            case .up: .line(x: caretX, last: true)
-            case .down: .line(x: caretX, last: false)
-            case .tab, .backtab: .all
-            }
-            begin(cellAt: table.cells[targetRow][targetColumn].location, placing: placement)
-        case .leaveAbove:
-            leave(table, above: true)
-        case .leaveBelow:
-            leave(table, above: false)
-        case .addRow(let targetColumn):
-            commit()
-            let lastRow = table.cells.count - 1
-            let anchor = table.cells[lastRow][min(targetColumn, table.cells[lastRow].count - 1)].location
-            guard let edit = TableEditing.edit(.addRowBelow, at: anchor, in: text, blockMap: owner.styler.blockMap) else {
-                return true
-            }
-            owner.apply(edit)
-            begin(cellAt: edit.selectionAfter.location, placing: .start)
-        case .removeLastRowAndLeave:
-            let edit = TableEditing.editRemovingLastRow(of: table, in: text)
-            end(placingCursorAt: nil)
-            owner.apply(edit)
-        }
-        return true
-    }
-
-    /// Out of the table: to the end of the line above it, or the start of the
-    /// line below it (a new one when the table ends the note).
-    private func leave(_ table: TableLayout, above: Bool) {
-        guard let storage = textView.textStorage else { return }
-        let text = storage.mutableString
-        if above {
-            guard table.range.location > 0 else { return NSSound.beep() }
-            var start = 0, end = 0
-            text.getLineStart(&start, end: nil, contentsEnd: &end, for: NSRange(location: table.range.location - 1, length: 0))
-            self.end(placingCursorAt: end)
-            return
-        }
-        var lineEnd = 0
-        text.getLineStart(nil, end: &lineEnd, contentsEnd: nil, for: NSRange(location: NSMaxRange(table.range), length: 0))
-        if lineEnd > NSMaxRange(table.range) {
-            end(placingCursorAt: lineEnd)
-        } else {
-            end(placingCursorAt: nil)
-            owner.apply(TextEdit(range: NSRange(location: text.length, length: 0), replacement: "\n",
-                                 selectionAfter: NSRange(location: text.length + 1, length: 0)))
-        }
     }
 }

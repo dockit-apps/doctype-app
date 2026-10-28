@@ -1,6 +1,7 @@
 // Editing behaviors on top of plain typing: Return, Backspace and Tab in lists and
-// quotes, task box clicks, keeping the cursor out of hidden syntax, and applying
-// core TextEdits as one undo step. (Typing in tables: TableCellSession.)
+// quotes, task box clicks, keeping the cursor out of hidden syntax, applying
+// core TextEdits as one undo step, and finishing what an undo leaves undone.
+// (Typing in tables: TableCellSession.)
 
 import AppKit
 import DocTypeCore
@@ -120,5 +121,27 @@ extension EditorController {
             }
         }
         return isProse ? value : 0
+    }
+
+    // MARK: - Undo
+
+    /// An undo or redo may change any part of the note (a table cell's typing,
+    /// another cell, a row), so a cell being edited closes first; the cell the
+    /// change is in opens once the cursor lands there (moveCursorOutOfTables).
+    @objc func noteWillUndoOrRedo(_ notification: Notification) {
+        guard let undoManager = textView.undoManager, notification.object as? UndoManager === undoManager else { return }
+        tableCells.end(placingCursorAt: nil)
+    }
+
+    /// NSTextView undoes and redoes an edit made in code (`apply`) without
+    /// telling its delegate: no textDidChange, and the cursor stays where it
+    /// was. So a change an undo or redo leaves unfinished is finished like any
+    /// edit: restyled and saved, with the cursor at its end (where it's in a
+    /// table, that cell opens). Undoing typing tells the delegate as usual.
+    @objc func noteDidUndoOrRedo(_ notification: Notification) {
+        guard let undoManager = textView.undoManager, notification.object as? UndoManager === undoManager,
+              let edited = styler.pendingEditedRange else { return }
+        textView.didChangeText()
+        textView.setSelectedRange(NSRange(location: min(NSMaxRange(edited), (textView.string as NSString).length), length: 0))
     }
 }

@@ -1,5 +1,5 @@
 // Owns the editor's text view and the note open in it: loading, dirty tracking,
-// autosave, and reacting when the note changes on disk (see ExternalChangePolicy).
+// autosave. Reacting when the note changes on disk is in +ExternalChanges.
 //
 // The text view holds only the note's body. The frontmatter (tags) is kept here
 // and joined back on save, so the editor never shows YAML.
@@ -14,8 +14,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     static let autosaveDelay = Duration.seconds(1)
 
     /// Set while the note changed on disk and the editor has unsaved edits.
-    /// Holds the disk text; autosave is paused until it's resolved.
-    private(set) var pendingDiskText: String?
+    /// Holds the disk text; autosave is paused until it's resolved (+ExternalChanges).
+    var pendingDiskText: String?
     /// Tags from the open note's frontmatter (shown in the tag row). Set only
     /// here and in EditorController+Tags.
     var tags: [String] = []
@@ -36,9 +36,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
     @ObservationIgnored private(set) var path: String?
     @ObservationIgnored var frontmatter: Frontmatter?
     /// The note's full text as we last loaded it from or saved it to disk.
-    @ObservationIgnored private var lastSyncedText = ""
+    @ObservationIgnored var lastSyncedText = ""
     @ObservationIgnored var isDirty = false
-    @ObservationIgnored private var autosaveTask: Task<Void, Never>?
+    @ObservationIgnored var autosaveTask: Task<Void, Never>?
     /// True while the open note's file is being renamed or moved.
     @ObservationIgnored private var isMoving = false
     @ObservationIgnored var library: Library?
@@ -97,7 +97,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     }
 
     /// The note's full text as it would be written now: frontmatter + editor body.
-    private var currentText: String { (frontmatter?.raw ?? "") + textView.string }
+    var currentText: String { (frontmatter?.raw ?? "") + textView.string }
 
     // MARK: - Opening and closing
 
@@ -185,83 +185,10 @@ final class EditorController: NSObject, NSTextViewDelegate {
         }
     }
 
-    // MARK: - External changes
-
-    /// Called when the open note may have changed on disk.
-    func noteChangedOnDisk() async {
-        guard let path, let library else { return }
-        guard let disk = try? await library.readNote(path) else {
-            await noteRemovedFromDisk()
-            return
-        }
-        guard path == self.path else { return }  // switched notes while reading
-        let diskText = disk.text
-        switch ExternalChangePolicy.action(
-            diskText: diskText, lastSyncedText: lastSyncedText,
-            hasUnsavedEdits: isDirty, conflictPending: pendingDiskText != nil
-        ) {
-        case .ignore:
-            break
-        case .reload:
-            let note = await prepare(disk, path: path)
-            guard path == self.path else { return }
-            if isDirty {
-                // You started typing while the new version was being prepared.
-                autosaveTask?.cancel()
-                pendingDiskText = diskText
-            } else {
-                show(note, keepingPosition: true)
-            }
-        case .showConflict:
-            autosaveTask?.cancel()
-            pendingDiskText = diskText
-        }
-    }
-
-    /// The open note was deleted or moved away by another program. Unsaved edits
-    /// are kept as a conflict copy; then the editor closes.
-    private func noteRemovedFromDisk() async {
-        if let path, let library, isDirty || pendingDiskText != nil {
-            do {
-                try await library.saveConflictCopy(of: path, text: currentText)
-            } catch {
-                onError("Couldn't keep your edits to “\(path)”: \(error.localizedDescription)")
-                return  // keep the text in the editor rather than lose it
-            }
-        }
-        isDirty = false
-        pendingDiskText = nil
-        await close()
-    }
-
-    /// Applies the banner choice: first the conflict copy, then the final text.
-    func resolveConflict(_ choice: ExternalChangePolicy.Choice) async {
-        guard let diskText = pendingDiskText, let path, let library else { return }
-        // Read-only while resolving, so nothing typed during the saves can be lost.
-        textView.isEditable = false
-        defer { textView.isEditable = !isReadOnly }
-        let resolution = ExternalChangePolicy.resolve(choice, editorText: currentText, diskText: diskText)
-        do {
-            try await library.saveConflictCopy(of: path, text: resolution.copyText)
-        } catch {
-            onError("Couldn't save a conflict copy of “\(path)”: \(error.localizedDescription)")
-            return  // banner stays; nothing has been discarded
-        }
-        pendingDiskText = nil
-        switch choice {
-        case .keepMine:
-            lastSyncedText = diskText
-            isDirty = true
-            await save()
-        case .useDiskVersion:
-            show(await prepare(NoteText(text: resolution.finalText, isUTF8: true), path: path), keepingPosition: true)
-        }
-    }
-
     // MARK: - Showing text
 
     /// A note's text split and styled, ready to put on screen.
-    private struct PreparedNote {
+    struct PreparedNote {
         let text: String
         let frontmatter: Frontmatter?
         let body: String
@@ -273,7 +200,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     /// Splits off the frontmatter, styles the body and measures its images, all
     /// off the main thread.
-    private func prepare(_ note: NoteText, path: String) async -> PreparedNote {
+    func prepare(_ note: NoteText, path: String) async -> PreparedNote {
         let text = note.text
         let (frontmatter, body) = Frontmatter.split(text)
         let bodyText = String(body)
@@ -286,7 +213,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     /// Puts a prepared note into the editor without registering undo.
     /// When reloading the same note, the caret and scroll position stay put.
-    private func show(_ note: PreparedNote, keepingPosition: Bool) {
+    func show(_ note: PreparedNote, keepingPosition: Bool) {
         let scrollOrigin = scrollView.contentView.bounds.origin
         let length = (note.body as NSString).length
         let selection = keepingPosition
@@ -335,28 +262,6 @@ final class EditorController: NSObject, NSTextViewDelegate {
         if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
         updateIsInTable()
         moveCursorOutOfTables()
-    }
-
-    // MARK: - Undo
-
-    /// An undo or redo may change any part of the note (a table cell's typing,
-    /// another cell, a row), so a cell being edited closes first; the cell the
-    /// change is in opens once the cursor lands there (moveCursorOutOfTables).
-    @objc private func noteWillUndoOrRedo(_ notification: Notification) {
-        guard let undoManager = textView.undoManager, notification.object as? UndoManager === undoManager else { return }
-        tableCells.end(placingCursorAt: nil)
-    }
-
-    /// NSTextView undoes and redoes an edit made in code (`apply`) without
-    /// telling its delegate: no textDidChange, and the cursor stays where it
-    /// was. So a change an undo or redo leaves unfinished is finished like any
-    /// edit: restyled and saved, with the cursor at its end (where it's in a
-    /// table, that cell opens). Undoing typing tells the delegate as usual.
-    @objc private func noteDidUndoOrRedo(_ notification: Notification) {
-        guard let undoManager = textView.undoManager, notification.object as? UndoManager === undoManager,
-              let edited = styler.pendingEditedRange else { return }
-        textView.didChangeText()
-        textView.setSelectedRange(NSRange(location: min(NSMaxRange(edited), (textView.string as NSString).length), length: 0))
     }
 
     func scheduleAutosave() {
