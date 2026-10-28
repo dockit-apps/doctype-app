@@ -109,15 +109,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         let previous = styledSelection
         let text = storage.mutableString
         let clampedPrevious = Self.clamp(previous, toLength: text.length)
-        let paragraph = text.paragraphRange(for: selection)
-        // Within a line nothing changes, except when the cursor moves to another
-        // cell of a table row with `<br>`s: the cell it's in shows its text, the
-        // others their lines.
-        let between = NSRange(location: min(clampedPrevious.location, selection.location),
-                              length: abs(clampedPrevious.location - selection.location))
-        guard text.paragraphRange(for: clampedPrevious) != paragraph
-                || (text.range(of: "|", range: between).location != NSNotFound
-                    && text.range(of: "<br", options: .caseInsensitive, range: paragraph).location != NSNotFound) else {
+        guard text.paragraphRange(for: clampedPrevious) != text.paragraphRange(for: selection) else {
             styledSelection = selection
             return
         }

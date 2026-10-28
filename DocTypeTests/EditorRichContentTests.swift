@@ -139,25 +139,28 @@ struct EditorRichContentTests {
         #expect(abs(x(textView.selectedRange().location) - window.convertFromScreen(glyphEnd).maxX) < 0.5)
     }
 
-    /// Cells with `<br>` show their lines stacked, and the row grows; the cell
-    /// the cursor is in shows its text instead, so typing works as everywhere.
+    /// Cells with `<br>` show their lines stacked, and the row grows, also while
+    /// the cursor is in them: the editor draws the cursor there and maps clicks.
     @Test func cellsWithLineBreaksShowTheirLines() async throws {
-        let text = "intro\n\n| Name | Notes |\n| --- | --- |\n| Al | first<br>second<br>third |\n| Bo | one |\n\nafter"
+        let text = "intro\n\n| Name | Notes |\n| --- | --- |\n| Al | first<br>second<br><br>last |\n| Bo | one |\n\nafter"
         let (editor, folder, window) = try await editor(showing: text)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let textView = editor.textView
+        let textView = editor.textView as! MarkdownTextView
         let string = text as NSString
-        let notes = string.range(of: " first<br>second<br>third ")
+        let notes = string.range(of: " first<br>second<br><br>last ")
         func drawnLines(at location: Int) -> [String]? {
             (textView.textStorage?.attribute(EditorTheme.tableCellLinesKey, at: location, effectiveRange: nil)
                 as? TableCellLines)?.lines.map(\.string)
         }
+
+        // Drawn as lines wherever the cursor is, also in the cell.
         textView.setSelectedRange(NSRange(location: 0, length: 0))
-        #expect(drawnLines(at: notes.location) == ["first", "second", "third"])
-        // Two more lines than a row of its own: two line advances of extra room.
-        let row = textView.textStorage?.attribute(EditorTheme.tableRowKey, at: notes.location, effectiveRange: nil) as? TableRowAttribute
-        #expect(row?.extraHeight == 2 * EditorTheme.tableLineAdvance)
+        #expect(drawnLines(at: notes.location) == ["first", "second", "", "last"])
+        textView.setSelectedRange(NSRange(location: string.range(of: "second").location, length: 0))
+        #expect(drawnLines(at: notes.location) == ["first", "second", "", "last"])
         #expect(drawnLines(at: string.range(of: "one").location) == nil)  // no breaks: plain text
+        let row = textView.textStorage?.attribute(EditorTheme.tableRowKey, at: notes.location, effectiveRange: nil) as? TableRowAttribute
+        #expect(row?.extraHeight == 3 * EditorTheme.tableLineAdvance)
         // The grid still lines up across rows.
         layOut(textView)
         var rows = pipeColumns(text, in: textView, window)
@@ -166,27 +169,43 @@ struct EditorRichContentTests {
             for (x, expected) in zip(line, rows[0]) { #expect(abs(x - expected) < 0.5, "\(rows)") }
         }
 
-        // The cursor in the cell: its text, <br> and all.
-        textView.setSelectedRange(NSRange(location: string.range(of: "second").location, length: 0))
-        #expect(drawnLines(at: notes.location) == nil)
-        // Over to "Al" in the same row: the cell left behind shows its lines again.
-        textView.setSelectedRange(NSRange(location: string.range(of: "Al").location + 1, length: 0))
-        #expect(drawnLines(at: notes.location) == ["first", "second", "third"])
+        // The report: a click on a lower line of the cell didn't reach it.
+        let cell = try #require(textView.drawnCell(containing: notes.location + 1))
+        let onEmptyLine = NSPoint(x: cell.origin.x + 4, y: cell.origin.y + 2.5 * EditorTheme.tableLineAdvance)
+        #expect(textView.clickDrawnCell(at: onEmptyLine, with: mouse(.leftMouseDown, at: onEmptyLine, in: textView)))
+        textView.mouseUp(with: mouse(.leftMouseUp, at: onEmptyLine, in: textView))
+        let between = string.range(of: "<br><br>").location + 4
+        #expect(textView.selectedRange() == NSRange(location: between, length: 0))
+        textView.insertText("third", replacementRange: textView.selectedRange())
+        #expect(textView.string.contains("| Al | first<br>second<br>third<br>last |"))
+        // The drawn cursor sits after "third", on the third line.
+        let caret = textView.cellOverlay.frame
+        let typed = try #require(textView.drawnCell(containing: textView.selectedRange().location))
+        #expect(abs(caret.minY - (typed.origin.y + 2 * EditorTheme.tableLineAdvance)) < 0.5)
+        #expect(caret.minX > typed.origin.x + 20)
+        let clickOnLast = NSPoint(x: typed.origin.x + typed.lines.columnWidth + 2, y: typed.origin.y + 3.5 * EditorTheme.tableLineAdvance)
+        #expect(textView.clickDrawnCell(at: clickOnLast, with: mouse(.leftMouseDown, at: clickOnLast, in: textView)))
+        textView.mouseUp(with: mouse(.leftMouseUp, at: clickOnLast, in: textView))
+        let last = (textView.string as NSString).range(of: "last")
+        #expect(textView.selectedRange() == NSRange(location: last.upperBound, length: 0))  // right of the text: its end
 
-        // Shift-Return adds a line to the cell, and the row grows with it.
-        textView.setSelectedRange(NSRange(location: string.range(of: "one").upperBound, length: 0))
-        let before = textView.textStorage?.attribute(EditorTheme.tableRowKey, at: string.range(of: "one").location,
-                                                     effectiveRange: nil) as? TableRowAttribute
-        #expect(before?.extraHeight == 0)
+        // ↑ / ↓ go along the cell's lines; Backspace at a line's start joins it up.
+        textView.doCommand(by: #selector(NSResponder.moveUp(_:)))
+        let third = (textView.string as NSString).range(of: "third")
+        #expect(textView.selectedRange().location == third.location + 4)
+        textView.setSelectedRange(NSRange(location: third.location, length: 0))
+        textView.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+        #expect(textView.string.contains("| Al | first<br>secondthird<br>last |"))
+
+        // Shift-Return adds a line to a cell, and the row grows with it.
+        let one = (textView.string as NSString).range(of: "one")
+        textView.setSelectedRange(NSRange(location: one.upperBound, length: 0))
         textView.doCommand(by: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
         textView.insertText("two", replacementRange: textView.selectedRange())
-        editor.styler.applyPendingStyles(in: textView.textStorage!)
-        let one = (textView.string as NSString).range(of: "one<br>two")
-        #expect(one.location != NSNotFound)
-        let after = textView.textStorage?.attribute(EditorTheme.tableRowKey, at: one.location, effectiveRange: nil) as? TableRowAttribute
-        #expect(after?.extraHeight == EditorTheme.tableLineAdvance)
-        textView.setSelectedRange(NSRange(location: 0, length: 0))
-        #expect(drawnLines(at: one.location - 1) == ["one", "two"])
+        let oneTwo = (textView.string as NSString).range(of: "one<br>two")
+        #expect(drawnLines(at: oneTwo.location - 1) == ["one", "two"])
+        let tall = textView.textStorage?.attribute(EditorTheme.tableRowKey, at: oneTwo.location, effectiveRange: nil) as? TableRowAttribute
+        #expect(tall?.extraHeight == EditorTheme.tableLineAdvance)
     }
 
     // MARK: Images

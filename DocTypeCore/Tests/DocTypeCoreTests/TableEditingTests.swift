@@ -297,3 +297,60 @@ struct TableHorizontalMoveTests {
         #expect(move(forward: false, from: ab.upperBound + 1) == ab.upperBound - 1)
     }
 }
+
+/// Cells with `<br>`: shown as lines, so the cursor moves along those lines.
+struct TableCellLineTests {
+    private let text = "| Name | Notes |\n| --- | --- |\n| Al | one<br>two<br><br>four |\n| Bo | x |" as NSString
+    private var map: BlockMap { BlockMap(text: text) }
+    private func at(_ piece: String) -> NSRange { text.range(of: piece) }
+    private func cursor(_ location: Int) -> NSRange { NSRange(location: location, length: 0) }
+
+    @Test func aCellsLinesAreSplitAtItsBreaks() {
+        let cell = NSRange(location: at(" one").location, length: at(" |\n| Bo").location - at(" one").location + 1)
+        let lines = TableEditing.cellLines(of: cell, in: text).map { text.substring(with: $0) }
+        #expect(lines == ["one", "two", "", "four"])
+        #expect(TableEditing.cellLines(of: NSRange(location: at(" x").location, length: 3), in: text).count == 1)
+    }
+
+    @Test func upAndDownMoveBetweenACellsLinesFirst() {
+        let two = at("two")
+        #expect(TableEditing.caretForVerticalMove(up: true, in: text, selection: cursor(two.location + 2), blockMap: map)
+                == at("one").location + 2)
+        let empty = at("<br><br>").location + 4
+        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(two.upperBound), blockMap: map) == empty)
+        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(empty), blockMap: map)
+                == at("four").location)
+        // Down from the last line: the next row; up from the row below: the last line.
+        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(at("four").location + 1), blockMap: map)
+                == at("x").location + 1)
+        #expect(TableEditing.caretForVerticalMove(up: true, in: text, selection: cursor(at("x").location), blockMap: map)
+                == at("four").location)
+        // Up from the header cell above's row: down into the first line.
+        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(at("Notes").location), blockMap: map)
+                == at("one").location)
+    }
+
+    @Test func leftAndRightStepOverABreak() {
+        #expect(TableEditing.caretForHorizontalMove(forward: true, in: text, selection: cursor(at("one").upperBound), blockMap: map)
+                == at("two").location)
+        #expect(TableEditing.caretForHorizontalMove(forward: false, in: text, selection: cursor(at("two").location), blockMap: map)
+                == at("one").upperBound)
+        #expect(TableEditing.caretForHorizontalMove(forward: true, in: text, selection: cursor(at("one").location + 1), blockMap: map) == nil)
+    }
+
+    @Test func backspaceAtALinesStartJoinsItToTheLineAbove() {
+        let edit = TableEditing.editForDelete(forward: false, in: text, selection: cursor(at("two").location), blockMap: map)
+        #expect(edit.map { $0.applied(to: text as String) }?.contains("| one two<br><br>four |") == false)
+        #expect(edit.map { $0.applied(to: text as String) }?.contains("| onetwo<br><br>four |") == true)
+        #expect(edit?.selectionAfter == cursor(at("one").upperBound))
+        let forward = TableEditing.editForDelete(forward: true, in: text, selection: cursor(at("two").upperBound), blockMap: map)
+        #expect(forward.map { $0.applied(to: text as String) }?.contains("one<br>two<br>four") == true)
+    }
+
+    @Test func aCursorInsideABreakMovesOutOfIt() {
+        let br = at("<br>two")
+        #expect(TableEditing.adjustedCaret(br.location + 2, from: br.location, in: text, blockMap: map) == at("two").location)
+        #expect(TableEditing.adjustedCaret(br.location + 2, from: at("two").location, in: text, blockMap: map) == at("one").upperBound)
+        #expect(TableEditing.adjustedCaret(at("one").location + 1, from: 0, in: text, blockMap: map) == nil)
+    }
+}

@@ -267,6 +267,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         // Clearing makes ⌘Z never reach text from another note or version.
         textView.undoManager?.removeAllActions()
         textView.setSelectedRange(selection)
+        textView.updateDrawnCellCursor()
         if keepingPosition {
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -280,6 +281,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         isDirty = true
         if let storage = textView.textStorage { styler.applyPendingStyles(in: storage) }
+        textView.updateDrawnCellCursor()
         scheduleAutosave()
     }
 
@@ -287,6 +289,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     func textViewDidChangeSelection(_ notification: Notification) {
         if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
         updateIsInTable()
+        textView.updateDrawnCellCursor()
     }
 
     func scheduleAutosave() {

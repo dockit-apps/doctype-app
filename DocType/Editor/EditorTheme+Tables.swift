@@ -8,12 +8,14 @@
 //   drawn at a stored offset inside it (the attribute's value).
 // Line breaks in cells (`<br>`): a row is one line of text, and TextKit lays
 // text out in order, so `b` in `| a<br>b | c |` can't sit under `a` while `c`
-// sits beside it. So such cells hide their text and their lines are drawn in
-// the grid instead (BlockDecorations), except the cell the cursor is in: it
-// shows its text, `<br>` dimmed, like other markdown at the cursor. A row keeps
-// the height of its tallest cell either way, so it doesn't jump.
-// (A real text line placed out of order isn't possible: TextKit 2 ignores line
-// fragments built by hand for the cursor and clicks; tried.)
+// sits beside it. So such cells hide their text, and their lines are drawn in
+// the grid instead (BlockDecorations), always, also while editing them: the
+// editor draws the cursor and selection there and maps clicks to the text
+// itself (MarkdownTextView+TableCells), and the arrow keys move along the
+// lines (TableEditing). Typing still goes into the text, so undo and saving
+// work as everywhere. A row is as tall as its tallest cell.
+// (Text lines placed out of order by hand aren't possible: TextKit 2 ignores
+// hand-built line fragments for the cursor and clicks; tried.)
 // Alternatives tried: extra space (kerning) after a character, but TextKit 2
 // puts the cursor halfway into that space while drawing the text after all of
 // it, so the cursor floated away from the text; and glyph stretching
@@ -35,6 +37,13 @@ extension EditorTheme {
         let font = NSFont.systemFont(ofSize: 15)
         return (font.ascender - font.descender + font.leading).rounded(.up) + tableLineSpacing
     }()
+    /// Hidden text of a cell drawn as lines: far smaller than other hidden
+    /// syntax, as a long cell's tiny widths would add up to a visible sliver
+    /// (where the system selection would show).
+    static let drawnCellTextAttributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 0.001),
+        .foregroundColor: NSColor.clear,
+    ]
     private static let pipeWidth = ("|" as NSString).size(withAttributes: [.font: bodyFont]).width
     private static let stretchedPipeFonts = NSCache<NSNumber, NSFont>()
 
@@ -51,12 +60,12 @@ extension EditorTheme {
 
     /// Lays out every table's columns among `spans` (see the top of this file).
     /// A row wider than the editor still wraps.
-    static func alignTableColumns(_ spans: [StyleSpan], in text: NSMutableAttributedString, selection: NSRange) {
+    static func alignTableColumns(_ spans: [StyleSpan], in text: NSMutableAttributedString) {
         var table: [TableCellLayout] = []
         for span in spans {
             guard case .tableCell(let row, let column, let alignment) = span.style else { continue }
             if row == 0, column == 0 {
-                layOutColumns(table, in: text, selection: selection)
+                layOutColumns(table, in: text)
                 table.removeAll(keepingCapacity: true)
             }
             // The |---| row is hidden and takes no part.
@@ -64,7 +73,7 @@ extension EditorTheme {
                 table.append(TableCellLayout(range: span.range, row: row, column: column, alignment: alignment))
             }
         }
-        layOutColumns(table, in: text, selection: selection)
+        layOutColumns(table, in: text)
     }
 
     private struct TableCellLayout {
@@ -74,53 +83,17 @@ extension EditorTheme {
         let alignment: TableAlignment
     }
 
-    /// Each `<br>` (or `<br/>`, `<br />`, any case) in `range`. Scanned on the
-    /// NSString itself: this runs for every cell on every keystroke in a table.
-    private static func lineBreaks(in range: NSRange, of string: NSString) -> [NSRange] {
-        var found: [NSRange] = []
-        var search = range
-        while search.length > 0 {
-            let open = string.range(of: "<br", options: .caseInsensitive, range: search)
-            guard open.location != NSNotFound else { break }
-            var end = open.upperBound
-            while end < range.upperBound, [32, 9].contains(string.character(at: end)) { end += 1 }  // spaces, tabs
-            if end < range.upperBound, string.character(at: end) == 47 { end += 1 }  // "/"
-            if end < range.upperBound, string.character(at: end) == 62 {  // ">"
-                found.append(NSRange(location: open.location, length: end + 1 - open.location))
-                end += 1
-            }
-            search = NSRange(location: max(end, open.upperBound), length: range.upperBound - max(end, open.upperBound))
-        }
-        return found
-    }
-
-    /// The cell's text split at its `<br>`s, each piece without the spaces around it.
-    private static func lines(of content: NSRange, in string: NSString) -> [NSRange] {
-        guard content.length > 0 else { return [content] }
-        var pieces: [NSRange] = []
-        var start = content.location
-        for match in lineBreaks(in: content, of: string) {
-            pieces.append(NSRange(location: start, length: match.location - start))
-            start = match.upperBound
-        }
-        pieces.append(NSRange(location: start, length: content.upperBound - start))
-        return pieces.map { TableEditing.contentRange(of: $0, in: string) }
-    }
-
-    private static func layOutColumns(_ cells: [TableCellLayout], in text: NSMutableAttributedString,
-                                      selection: NSRange) {
+    private static func layOutColumns(_ cells: [TableCellLayout], in text: NSMutableAttributedString) {
         guard !cells.isEmpty else { return }
         let string = text.mutableString
 
         // Each cell's text without the spaces around it, and its lines.
         let contents = cells.map { TableEditing.contentRange(of: $0.range, in: string) }
-        let cellLines = contents.map { lines(of: $0, in: string) }
+        let cellLines = cells.map { TableEditing.cellLines(of: $0.range, in: string) }
         var lineCounts: [Int: Int] = [:]
         for (cell, pieces) in zip(cells, cellLines) { lineCounts[cell.row] = max(lineCounts[cell.row] ?? 1, pieces.count) }
-        // Cells with line breaks are drawn as lines, except the one the cursor is in.
-        let drawn = zip(cells, cellLines).map { cell, pieces in
-            pieces.count > 1 && !(selection.location <= cell.range.upperBound && selection.upperBound >= cell.range.location)
-        }
+        // Cells with line breaks are drawn as lines.
+        let drawn = cellLines.map { $0.count > 1 }
 
         var widths: [CGFloat] = []
         var cellDrawings: [(TableCellLayout, TableCellLines)] = []
@@ -130,9 +103,10 @@ extension EditorTheme {
                 let pieces = cellLines[index].map { $0.length == 0 ? NSAttributedString() : text.attributedSubstring(from: $0) }
                 let pieceWidths = pieces.map { $0.size().width }
                 widths.append(pieceWidths.max() ?? 0)
-                cellDrawings.append((cell, TableCellLines(lines: pieces, widths: pieceWidths, columnWidth: 0,
-                                                          alignment: cell.alignment)))
-                text.addAttributes(concealedAttributes, range: cell.range)
+                let ranges = cellLines[index].map { NSRange(location: $0.location - cell.range.location, length: $0.length) }
+                cellDrawings.append((cell, TableCellLines(lines: pieces, widths: pieceWidths, lineRanges: ranges,
+                                                          columnWidth: 0, alignment: cell.alignment)))
+                text.addAttributes(drawnCellTextAttributes, range: cell.range)
             } else {
                 widths.append(content.length == 0 ? 0 : text.attributedSubstring(from: content).size().width)
                 let before = NSRange(location: cell.range.location, length: content.location - cell.range.location)
@@ -181,7 +155,7 @@ extension EditorTheme {
         }
 
         for (cell, drawing) in cellDrawings {
-            let lines = TableCellLines(lines: drawing.lines, widths: drawing.widths,
+            let lines = TableCellLines(lines: drawing.lines, widths: drawing.widths, lineRanges: drawing.lineRanges,
                                        columnWidth: columnWidths[cell.column] ?? 0, alignment: drawing.alignment)
             text.addAttribute(tableCellLinesKey, value: lines, range: cell.range)
         }
@@ -203,10 +177,46 @@ extension EditorTheme {
     }
 }
 
-/// A table cell drawn as lines (it has `<br>`s and the cursor isn't in its row).
+/// A table cell drawn as lines (it has `<br>`s), and where its text is: for
+/// drawing it and for putting the cursor, selection and clicks on its lines.
+/// Positions are relative to the cell: x from where its text starts, y from the
+/// top of its first line; character offsets from the cell's start.
 nonisolated struct TableCellLines: Hashable, @unchecked Sendable {
     let lines: [NSAttributedString]
     let widths: [CGFloat]
+    /// Each line's text in the cell (offsets from the cell's start).
+    let lineRanges: [NSRange]
     let columnWidth: CGFloat
     let alignment: TableAlignment
+
+    /// How far line `index` is moved in by the column's alignment.
+    func indent(ofLine index: Int) -> CGFloat {
+        switch alignment {
+        case .left: 0
+        case .center: ((columnWidth - widths[index]) / 2).rounded()
+        case .right: columnWidth - widths[index]
+        }
+    }
+
+    /// The line a character offset is on (in a `<br>`: the line before it).
+    func line(of offset: Int) -> Int {
+        lineRanges.lastIndex { $0.location <= offset } ?? 0
+    }
+
+    /// Where the cursor at `offset` is drawn: x and the top of its line.
+    func caretPoint(at offset: Int) -> CGPoint {
+        let index = line(of: offset)
+        let inLine = min(max(offset - lineRanges[index].location, 0), lineRanges[index].length)
+        let ctLine = CTLineCreateWithAttributedString(lines[index])
+        let x = CTLineGetOffsetForStringIndex(ctLine, inLine, nil)
+        return CGPoint(x: indent(ofLine: index) + x, y: CGFloat(index) * EditorTheme.tableLineAdvance)
+    }
+
+    /// The character offset nearest to `point`.
+    func offset(at point: CGPoint) -> Int {
+        let index = min(max(Int(point.y / EditorTheme.tableLineAdvance), 0), lines.count - 1)
+        let ctLine = CTLineCreateWithAttributedString(lines[index])
+        let inLine = CTLineGetStringIndexForPosition(ctLine, CGPoint(x: point.x - indent(ofLine: index), y: 0))
+        return lineRanges[index].location + min(max(inLine, 0), lineRanges[index].length)
+    }
 }

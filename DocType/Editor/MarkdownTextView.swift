@@ -47,6 +47,13 @@ final class MarkdownTextView: NSTextView {
     /// Called with files dropped or pasted into the editor and where they go.
     var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
 
+    /// Table cells with `<br>` (MarkdownTextView+TableCells): the overlay that
+    /// draws the cursor there, whether the system cursor is hidden for it, and a
+    /// drag that started in such a cell.
+    let cellOverlay = TableCellOverlayView()
+    var hidesSystemCursor = false
+    var cellDrag: (anchor: Int, cell: DrawnCell)?
+
     /// The image being resized: its syntax, width and where the drag started.
     private var resizing: (range: NSRange, startWidth: CGFloat, startX: CGFloat, width: CGFloat)?
 
@@ -73,6 +80,7 @@ final class MarkdownTextView: NSTextView {
             }
             return
         }
+        if clickDrawnCell(at: point, with: event) { return }
         guard let box = taskBoxLocation(at: point) else {
             super.mouseDown(with: event)
             return
@@ -82,6 +90,7 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if dragInDrawnCell(to: convert(event.locationInWindow, from: nil)) { return }
         guard let current = resizing else { return super.mouseDragged(with: event) }
         let x = convert(event.locationInWindow, from: nil).x
         let maxWidth = (textContainer?.size.width ?? bounds.width) - 2 * (textContainer?.lineFragmentPadding ?? 0)
@@ -92,6 +101,10 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if cellDrag != nil {
+            cellDrag = nil
+            return
+        }
         guard let finished = resizing else { return super.mouseUp(with: event) }
         resizing = nil
         onImageResize(finished.range, finished.width, true)
@@ -151,7 +164,7 @@ final class MarkdownTextView: NSTextView {
     }
 
     /// The decorated layout fragment under `point` (view coordinates), and the point in its coordinates.
-    private func decoratedFragment(at point: NSPoint) -> (DecoratedLayoutFragment, CGPoint)? {
+    func decoratedFragment(at point: NSPoint) -> (DecoratedLayoutFragment, CGPoint)? {
         guard let layout = textLayoutManager else { return nil }
         let origin = textContainerOrigin
         let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
@@ -255,15 +268,34 @@ final class MarkdownTextView: NSTextView {
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        if accepted { onFocusChange(true) }
+        if accepted {
+            onFocusChange(true)
+            updateDrawnCellCursor()
+        }
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
         let accepted = super.resignFirstResponder()
-        if accepted { onFocusChange(false) }
+        if accepted {
+            onFocusChange(false)
+            updateDrawnCellCursor()
+        }
         return accepted
     }
+
+    /// The drawn cursor in table cells shows only while the window is active.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        guard let window else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged), name: name, object: window)
+        }
+    }
+
+    @objc private func windowKeyChanged() { updateDrawnCellCursor() }
 
     /// Builds a TextKit 2 text view inside a scroll view, ready for the editor.
     static func makeScrollableEditor() -> (NSScrollView, MarkdownTextView) {

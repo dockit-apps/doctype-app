@@ -196,11 +196,26 @@ public enum TableEditing {
     public static func adjustedCaret(_ location: Int, from previous: Int, in text: NSString,
                                      blockMap: BlockMap) -> Int? {
         if let skipped = caretSkippingDelimiterRow(location, from: previous, in: text, blockMap: blockMap) { return skipped }
+        if let outOfBreak = caretOutOfLineBreak(location, from: previous, in: text, blockMap: blockMap) { return outOfBreak }
         guard let edge = rowEdge(location, from: previous, in: text, blockMap: blockMap) else { return nil }
         guard let leave = edge.leave else { return edge.snap }
         // Leaving the row: the spot reached may be in the table too.
         return caretSkippingDelimiterRow(leave, from: previous, in: text, blockMap: blockMap)
             ?? rowEdge(leave, from: leave, in: text, blockMap: blockMap)?.snap ?? leave
+    }
+
+    /// A cursor inside a cell's `<br>` (it's never shown, the lines are) goes to
+    /// the end of the line before it, or the start of the next when moving forward.
+    private static func caretOutOfLineBreak(_ location: Int, from previous: Int, in text: NSString,
+                                            blockMap: BlockMap) -> Int? {
+        guard location <= text.length,
+              text.range(of: "<br", options: .caseInsensitive, range: lineContaining(location, in: text)).location != NSNotFound,
+              let table = table(at: location, in: text, blockMap: blockMap),
+              let (row, column) = table.position(of: location), row != 1, column < table.cells[row].count else { return nil }
+        let lines = cellLines(of: table.cells[row][column], in: text)
+        let index = lineIndex(of: location, in: lines)
+        guard lines.count > 1, location > lines[index].upperBound, index < lines.count - 1 else { return nil }
+        return location > previous ? lines[index + 1].location : lines[index].upperBound
     }
 
     /// For a cursor outside a table row's outer pipes: the cell edge to snap to,
@@ -284,13 +299,22 @@ public enum TableEditing {
     public static func caretForVerticalMove(up: Bool, in text: NSString, selection: NSRange, blockMap: BlockMap) -> Int? {
         guard selection.length == 0, let table = table(at: selection.location, in: text, blockMap: blockMap),
               let (row, column) = table.position(of: selection.location), row != 1 else { return nil }
-        let target = up ? (row == 2 ? 0 : row - 1) : (row == 0 ? 2 : row + 1)
-        guard target >= 0, target < table.lines.count, column < table.cells[row].count else { return nil }
-        let from = contentRange(of: table.cells[row][column], in: text)
+        guard column < table.cells[row].count else { return nil }
+        // Within a cell's lines (`<br>`) first, then to the next row.
+        let lines = cellLines(of: table.cells[row][column], in: text)
+        let index = lineIndex(of: selection.location, in: lines)
+        let from = lines[index]
         let offset = min(max(selection.location - from.location, 0), from.length)
+        if up ? index > 0 : index < lines.count - 1 {
+            let to = lines[index + (up ? -1 : 1)]
+            return to.location + min(offset, to.length)
+        }
+        let target = up ? (row == 2 ? 0 : row - 1) : (row == 0 ? 2 : row + 1)
+        guard target >= 0, target < table.lines.count else { return nil }
         let cells = table.cells[target]
         guard !cells.isEmpty else { return table.lines[target].location }
-        let to = contentRange(of: cells[min(column, cells.count - 1)], in: text)
+        let targetLines = cellLines(of: cells[min(column, cells.count - 1)], in: text)
+        let to = up ? targetLines[targetLines.count - 1] : targetLines[0]
         return to.location + min(offset, to.length)
     }
 
@@ -306,6 +330,14 @@ public enum TableEditing {
               column < table.cells[row].count else { return nil }
         let location = selection.location
         let content = contentRange(of: table.cells[row][column], in: text)
+        // From one line of the cell to the next, over the `<br>` (and spaces) between.
+        let lines = cellLines(of: table.cells[row][column], in: text)
+        if lines.count > 1 {
+            let index = lineIndex(of: location, in: lines)
+            if forward, location >= lines[index].upperBound, index < lines.count - 1 { return lines[index + 1].location }
+            if !forward, location <= lines[index].location, index > 0 { return lines[index - 1].upperBound }
+            if location > lines[index].upperBound { return forward ? lines[index + 1].location : lines[index].upperBound }
+        }
         if content.length > 0 {
             // In the hidden spaces before or after the text: step into it.
             if forward, location < content.location {
@@ -375,6 +407,9 @@ public enum TableEditing {
     /// does nothing (a no-change edit). Nil everywhere else.
     public static func editForDelete(forward: Bool, in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
         guard selection.length == 0 else { return nil }
+        if let join = editJoiningCellLines(forward: forward, in: text, at: selection.location, blockMap: blockMap) {
+            return join
+        }
         let target = forward ? selection.location : selection.location - 1
         guard target >= 0, target < text.length, text.character(at: target) == 124,  // "|"
               table(at: selection.location, in: text, blockMap: blockMap) != nil,
@@ -383,9 +418,71 @@ public enum TableEditing {
         return moveSelection(from: selection, to: selection)
     }
 
+    /// Backspace at the start of a cell's line (Delete at its end) removes the
+    /// `<br>` before (after) it, joining the two lines, as in any text.
+    private static func editJoiningCellLines(forward: Bool, in text: NSString, at location: Int,
+                                             blockMap: BlockMap) -> TextEdit? {
+        guard let table = table(at: location, in: text, blockMap: blockMap),
+              let (row, column) = table.position(of: location), row != 1, column < table.cells[row].count else { return nil }
+        let lines = cellLines(of: table.cells[row][column], in: text)
+        guard lines.count > 1 else { return nil }
+        let index = lineIndex(of: location, in: lines)
+        let gap: NSRange
+        if forward, location == lines[index].upperBound, index < lines.count - 1 {
+            gap = NSRange(location: lines[index].upperBound, length: lines[index + 1].location - lines[index].upperBound)
+        } else if !forward, location == lines[index].location, index > 0 {
+            gap = NSRange(location: lines[index - 1].upperBound, length: lines[index].location - lines[index - 1].upperBound)
+        } else {
+            return nil
+        }
+        return TextEdit(range: gap, replacement: "", selectionAfter: NSRange(location: gap.location, length: 0))
+    }
+
     /// An edit that changes nothing but the selection.
     private static func moveSelection(from selection: NSRange, to target: NSRange) -> TextEdit {
         TextEdit(range: NSRange(location: selection.location, length: 0), replacement: "", selectionAfter: target)
+    }
+
+    /// The lines of a cell's text: split at its `<br>`s (also `<br/>`, `<br />`, any
+    /// case), each without the spaces around it. A cell without breaks has one.
+    public static func cellLines(of cell: NSRange, in text: NSString) -> [NSRange] {
+        let content = contentRange(of: cell, in: text)
+        guard content.length > 0 else { return [content] }
+        var pieces: [NSRange] = []
+        var start = content.location
+        for lineBreak in lineBreaks(in: content, of: text) {
+            pieces.append(NSRange(location: start, length: lineBreak.location - start))
+            start = lineBreak.upperBound
+        }
+        pieces.append(NSRange(location: start, length: content.upperBound - start))
+        return pieces.count == 1 ? pieces : pieces.map { contentRange(of: $0, in: text) }
+    }
+
+    /// Each `<br>` in `range`. Scanned on the NSString itself (no copy): this runs
+    /// for every cell on every keystroke in a table.
+    static func lineBreaks(in range: NSRange, of text: NSString) -> [NSRange] {
+        var found: [NSRange] = []
+        var search = range
+        while search.length > 0 {
+            let open = text.range(of: "<br", options: .caseInsensitive, range: search)
+            guard open.location != NSNotFound else { break }
+            var end = open.upperBound
+            while end < range.upperBound, [32, 9].contains(text.character(at: end)) { end += 1 }  // spaces, tabs
+            if end < range.upperBound, text.character(at: end) == 47 { end += 1 }  // "/"
+            if end < range.upperBound, text.character(at: end) == 62 {  // ">"
+                found.append(NSRange(location: open.location, length: end + 1 - open.location))
+                end += 1
+            }
+            let next = max(end, open.upperBound)
+            search = NSRange(location: next, length: range.upperBound - next)
+        }
+        return found
+    }
+
+    /// Which of `lines` the cursor at `location` is on: the one containing it, or
+    /// for a spot in a `<br>` between two, the one before.
+    static func lineIndex(of location: Int, in lines: [NSRange]) -> Int {
+        lines.lastIndex { $0.location <= location } ?? 0
     }
 
     /// A cell's text without its padding; for an empty cell, a cursor after its first space.

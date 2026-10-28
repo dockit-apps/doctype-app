@@ -88,7 +88,7 @@ enum EditorTheme {
                 text.addAttributes(attributes(for: span.style), range: span.range)
             }
         }
-        alignTableColumns(spans, in: text, selection: selection)
+        alignTableColumns(spans, in: text)
         reserveImageSpace(in: range, of: text)
         return unmeasuredImages
     }

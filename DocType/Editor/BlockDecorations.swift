@@ -175,24 +175,41 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         return buttons
     }
 
-    /// Draws the lines of cells with `<br>`s, whose text is hidden (see EditorTheme+Tables).
-    private func drawTableCellLines(at point: CGPoint, _ context: CGContext) {
-        guard !decorations.tableCells.isEmpty, let line = textLineFragments.first else { return }
+    /// The cells drawn as lines in this row (see EditorTheme+Tables): where each
+    /// starts in the paragraph and where its text's top left is, in fragment coordinates.
+    var drawnTableCells: [(start: Int, cell: TableCellLines, origin: CGPoint)] {
+        guard !decorations.tableCells.isEmpty, let line = textLineFragments.first else { return [] }
+        return decorations.tableCells.compactMap { location, cell in
+            guard NSLocationInRange(location, line.characterRange) else { return nil }
+            let origin = CGPoint(x: line.typographicBounds.minX + line.locationForCharacter(at: location).x,
+                                 y: line.typographicBounds.minY)
+            return (location, cell, origin)
+        }
+    }
+
+    /// Draws the lines of cells with `<br>`s, whose text is hidden.
+    private func drawTableCellLines(at point: CGPoint, isHeader: Bool, _ context: CGContext) {
+        let cells = drawnTableCells
+        guard !cells.isEmpty else { return }
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
-        for (location, cell) in decorations.tableCells where NSLocationInRange(location, line.characterRange) {
-            let x = point.x + line.typographicBounds.minX + line.locationForCharacter(at: location).x
-            var y = point.y + line.typographicBounds.minY
-            for (text, width) in zip(cell.lines, cell.widths) {
-                let offset: CGFloat = switch cell.alignment {
-                case .left: 0
-                case .center: (cell.columnWidth - width) / 2
-                case .right: cell.columnWidth - width
-                }
-                text.draw(with: CGRect(x: x + offset, y: y, width: width + 1, height: EditorTheme.tableLineAdvance),
+        for (_, cell, origin) in cells {
+            // The hidden text is where the system draws a selection at least a
+            // pixel wide, under this layer: paint over that spot.
+            let spot = CGRect(x: point.x + origin.x - 1, y: point.y + origin.y, width: 2,
+                              height: EditorTheme.tableLineAdvance - EditorTheme.tableLineSpacing)
+            context.setFillColor(NSColor.textBackgroundColor.cgColor)
+            context.fill(spot)
+            if isHeader {
+                context.setFillColor(Self.tableHeaderFill.cgColor)
+                context.fill(spot)
+            }
+            for (index, (text, width)) in zip(cell.lines, cell.widths).enumerated() {
+                let x = point.x + origin.x + cell.indent(ofLine: index)
+                let y = point.y + origin.y + CGFloat(index) * EditorTheme.tableLineAdvance
+                text.draw(with: CGRect(x: x, y: y, width: width + 1, height: EditorTheme.tableLineAdvance),
                           options: [.usesLineFragmentOrigin])
-                y += EditorTheme.tableLineAdvance
             }
         }
     }
@@ -224,7 +241,7 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         }
         context.strokePath()
 
-        drawTableCellLines(at: point, context)
+        drawTableCellLines(at: point, isHeader: row.index == 0, context)
 
         for (_, frame) in tableButtons {
             let circle = frame.offsetBy(dx: point.x, dy: point.y)
