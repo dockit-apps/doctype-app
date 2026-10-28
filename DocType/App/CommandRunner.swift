@@ -114,9 +114,12 @@ final class CommandRunner {
         case .addRowAbove, .addRowBelow, .addColumnLeft, .addColumnRight, .deleteRow, .deleteColumn,
              .alignColumnLeft, .alignColumnCenter, .alignColumnRight:
             model.selectedNotePath != nil && model.editor.hasFocus && model.editor.isInTable
-        case .bold, .italic, .inlineCode, .link, .heading1, .heading2, .heading3, .bodyText, .taskItem, .insertTable:
-            // Only while typing in the note, so they never touch the title field.
+        case .bold, .italic, .inlineCode, .link:
+            // Only while typing in the note (or a table cell), so they never touch the title field.
             model.selectedNotePath != nil && model.editor.hasFocus
+        case .heading1, .heading2, .heading3, .bodyText, .taskItem, .insertTable:
+            // Whole lines: not inside a table cell.
+            model.selectedNotePath != nil && model.editor.hasFocus && !model.editor.isEditingTableCell
         }
     }
 

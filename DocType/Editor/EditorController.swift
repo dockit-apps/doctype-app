@@ -19,10 +19,12 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Tags from the open note's frontmatter (shown in the tag row). Set only
     /// here and in EditorController+Tags.
     var tags: [String] = []
-    /// The text view has keyboard focus.
+    /// The text view, or a table cell's editor, has keyboard focus.
     private(set) var hasFocus = false
     /// The cursor is in a table (enables the table commands).
     var isInTable = false
+    /// A table cell is being edited (TableCellSession); line formats are off there.
+    var isEditingTableCell = false
 
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
@@ -43,6 +45,13 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// The editor's width when images were last sized, and a pending re-size.
     @ObservationIgnored var lastLayoutWidth: CGFloat = 0
     @ObservationIgnored var widthChangeTask: Task<Void, Never>?
+    /// Editing a table cell in its own text view (set up in init).
+    @ObservationIgnored private(set) var tableCells: TableCellSession!
+    /// ↑ or ↓ was just pressed in the note: where the cursor was across, so a
+    /// table it moves into opens the cell in that column.
+    @ObservationIgnored var pendingVerticalMove: (x: CGFloat, up: Bool)?
+    @ObservationIgnored private var textViewHasFocus = false
+    @ObservationIgnored private var cellEditorHasFocus = false
 
     override init() {
         (scrollView, textView) = MarkdownTextView.makeScrollableEditor()
@@ -51,11 +60,26 @@ final class EditorController: NSObject, NSTextViewDelegate {
         styler.textView = textView
         textView.textStorage?.delegate = styler
         textView.textLayoutManager?.delegate = blockDecorations
-        textView.onFocusChange = { [weak self] in self?.hasFocus = $0 }
+        textView.onFocusChange = { [weak self] focused in
+            self?.textViewHasFocus = focused
+            self?.updateFocus()
+        }
         textView.onTaskBoxClick = { [weak self] in self?.toggleTask(at: $0) }
         textView.onLinkClick = { [weak self] in self?.onOpenLink($0) }
+        tableCells = TableCellSession(owner: self)
         setUpImages()
         setUpTables()
+    }
+
+    /// Called when a table cell's editor gains or loses keyboard focus.
+    func cellEditorFocusChanged(_ focused: Bool) {
+        cellEditorHasFocus = focused
+        updateFocus()
+    }
+
+    private func updateFocus() {
+        let focused = textViewHasFocus || cellEditorHasFocus
+        if focused != hasFocus { hasFocus = focused }
     }
 
     func focusText() {
@@ -91,6 +115,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Empties the editor (e.g. when the library changes). Unsaved text is saved first.
     func close() async {
         await flush()
+        tableCells.cancel()
         path = nil
         frontmatter = nil
         tags = []
@@ -253,6 +278,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         let selection = keepingPosition
             ? NSRange(location: min(textView.selectedRange().location, length), length: 0)
             : NSRange(location: 0, length: 0)
+        tableCells.cancel()
 
         frontmatter = note.frontmatter
         tags = note.frontmatter?.tags ?? []
@@ -267,7 +293,6 @@ final class EditorController: NSObject, NSTextViewDelegate {
         // Clearing makes ⌘Z never reach text from another note or version.
         textView.undoManager?.removeAllActions()
         textView.setSelectedRange(selection)
-        textView.updateDrawnCellCursor()
         if keepingPosition {
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -281,7 +306,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         isDirty = true
         if let storage = textView.textStorage { styler.applyPendingStyles(in: storage) }
-        textView.updateDrawnCellCursor()
+        moveCursorOutOfTables()
         scheduleAutosave()
     }
 
@@ -289,7 +314,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     func textViewDidChangeSelection(_ notification: Notification) {
         if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
         updateIsInTable()
-        textView.updateDrawnCellCursor()
+        moveCursorOutOfTables()
     }
 
     func scheduleAutosave() {

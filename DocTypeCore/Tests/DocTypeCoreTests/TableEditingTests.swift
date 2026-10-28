@@ -77,48 +77,6 @@ struct TableEditingTests {
     @Test func shortRowsAreFilledUp() {
         #expect(run(.addColumnRight, "| A | B |\n|---|---|\n| 1^ |") == "| A |  | B |\n|---| --- |---|\n| 1 | ^ |  |")
     }
-
-    // MARK: Tab and Return
-
-    private func tab(_ marked: String, forward: Bool = true) -> String? {
-        let (text, selection) = parse(marked)
-        return show(TableEditing.editForTab(forward: forward, in: text, selection: selection, blockMap: BlockMap(text: text)), on: text)
-    }
-
-    private func newline(_ marked: String) -> String? {
-        let (text, selection) = parse(marked)
-        return show(TableEditing.editForNewline(in: text, selection: selection, blockMap: BlockMap(text: text)), on: text)
-    }
-
-    @Test func tabSelectsTheNextCellAndSkipsTheDelimiterRow() {
-        #expect(tab("| A^ | Bee |\n|---|---|\n| 1 | 2 |") == "| A | [[Bee]] |\n|---|---|\n| 1 | 2 |")
-        #expect(tab("| A | Bee^ |\n|---|---|\n| 1 | 2 |") == "| A | Bee |\n|---|---|\n| [[1]] | 2 |")
-        #expect(tab("| A | B |\n|---|---|\n| ^1 | 2 |", forward: false) == "| A | [[B]] |\n|---|---|\n| 1 | 2 |")
-        #expect(tab("| A | B |\n|---|---|\n|  | ^ |", forward: false) == "| A | B |\n|---|---|\n| ^ |  |")  // empty cell: a cursor
-    }
-
-    @Test func tabInTheLastCellAddsARow() {
-        #expect(tab("| A | B |\n|---|---|\n| 1 | 2^ |") == "| A | B |\n|---|---|\n| 1 | 2 |\n| ^ |  |")
-    }
-
-    @Test func shiftTabInTheFirstCellStaysPut() {
-        #expect(tab("| ^A | B |\n|---|---|", forward: false) == "| ^A | B |\n|---|---|")
-        #expect(tab("not a table^") == nil)
-    }
-
-    @Test func returnMovesDownAndAddsARowAtTheEnd() {
-        #expect(newline("| A | B^ |\n|---|---|\n| 1 | 2 |") == "| A | B |\n|---|---|\n| 1 | 2^ |")
-        #expect(newline("| A | B |\n|---|---|\n| 1 | 2^ |") == "| A | B |\n|---|---|\n| 1 | 2 |\n|  | ^ |")
-        #expect(newline("| A | [[Bee]] |\n|---|---|\n| 1 | 2 |") == "| A | Bee |\n|---|---|\n| 1 | 2^ |")  // after Tab
-    }
-
-    @Test func returnOnAnEmptyLastRowLeavesTheTable() {
-        #expect(newline("| A | B |\n|---|---|\n| 1 | 2 |\n| ^ |  |") == "| A | B |\n|---|---|\n| 1 | 2 |\n^")
-        #expect(newline("text^") == nil)
-    }
-
-    // MARK: Inserting
-
     @Test func insertingATableSelectsTheFirstHeader() {
         let (text, selection) = parse("Notes^")
         #expect(show(TableEditing.insertTable(in: text, selection: selection), on: text)
@@ -141,216 +99,83 @@ struct TableEditingTests {
                 == "above\n\n| [[Column 1]] | Column 2 |\n| --- | --- |\n|  |  |\n\nbelow")
     }
 
-    // MARK: The hidden |---| row
 
-    /// Where the cursor goes when moved from `previous` to `location`, as "^".
-    private func skip(_ text: String, to location: Int, from previous: Int) -> String? {
-        let string = text as NSString
-        guard let moved = TableEditing.adjustedCaret(location, from: previous, in: string,
-                                                                 blockMap: BlockMap(text: string)) else { return nil }
-        return string.replacingCharacters(in: NSRange(location: moved, length: 0), with: "^")
+    // MARK: Moving between cells
+
+    private let grid = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 |  |" as NSString
+    private func target(_ key: TableEditing.CellKey, _ row: Int, _ column: Int, in text: NSString? = nil) -> TableEditing.CellTarget {
+        let text = text ?? grid
+        let table = TableEditing.table(at: 0, in: text, blockMap: BlockMap(text: text))!
+        return TableEditing.target(of: key, fromRow: row, column: column, in: table, text: text)
     }
 
-    @Test func theCursorSkipsTheDelimiterRow() {
-        let text = "| Name | Grade |\n| --- | --- |\n| Al | 1 |\n\nend"
-        let delimiterColumn2 = 24, header = 2, body = 34
-        // Down (or right) onto it: on to the same column of the first body row.
-        #expect(skip(text, to: delimiterColumn2, from: 10) == "| Name | Grade |\n| --- | --- |\n| Al | 1^ |\n\nend")
-        #expect(skip(text, to: 17, from: 16) == "| Name | Grade |\n| --- | --- |\n| Al^ | 1 |\n\nend")
-        // Up (or left) onto it: back to the header.
-        #expect(skip(text, to: delimiterColumn2, from: body) == "| Name | Grade^ |\n| --- | --- |\n| Al | 1 |\n\nend")
-        #expect(skip(text, to: 18, from: header + 30) == "| Name^ | Grade |\n| --- | --- |\n| Al | 1 |\n\nend")
-        // Anywhere else: nothing to do.
-        #expect(skip(text, to: header, from: 0) == nil)
-        #expect(skip(text, to: body, from: 0) == nil)
-        #expect(skip("a\n| --- | --- |", to: 5, from: 0) == nil)  // not a table
+    @Test func arrowsGoToTheNeighboringCellAndOutAtTheEdges() {
+        #expect(target(.right, 0, 0) == .cell(row: 0, column: 1))
+        #expect(target(.right, 0, 1) == .cell(row: 2, column: 0))  // past the hidden |---| row
+        #expect(target(.left, 2, 0) == .cell(row: 0, column: 1))
+        #expect(target(.left, 0, 0) == .leaveAbove)
+        #expect(target(.right, 3, 1) == .leaveBelow)
+        #expect(target(.down, 0, 1) == .cell(row: 2, column: 1))
+        #expect(target(.up, 2, 1) == .cell(row: 0, column: 1))
+        #expect(target(.up, 0, 1) == .leaveAbove)
+        #expect(target(.down, 3, 0) == .leaveBelow)
     }
 
-    @Test func outsideTheOuterPipesTheCursorSnapsIntoACell() {
-        let text = "| Name | Grade |\n| --- | --- |\n| Al | 1 |"
-        let bodyStart = 31, bodyEnd = 41
-        // A click left or right of a row (or End): into the first / last cell.
-        #expect(skip(text, to: bodyStart, from: 3) == "| Name | Grade |\n| --- | --- |\n| ^Al | 1 |")
-        #expect(skip(text, to: bodyEnd, from: 3) == "| Name | Grade |\n| --- | --- |\n| Al | 1^ |")
-        #expect(skip(text, to: 16, from: 36) == "| Name | Grade^ |\n| --- | --- |\n| Al | 1 |")
-        #expect(skip("| a |  |\n|---|---|", to: 8, from: 2) == "| a | ^ |\n|---|---|")  // an empty cell: after its first space
-        // Inside the pipes nothing changes.
-        #expect(skip(text, to: bodyStart + 1, from: 3) == nil)
-        #expect(skip(text, to: bodyEnd - 1, from: 3) == nil)
+    @Test func tabAddsARowAfterTheLastCellAndShiftTabStopsAtTheFirst() {
+        #expect(target(.tab, 2, 1) == .cell(row: 3, column: 0))
+        #expect(target(.tab, 3, 1) == .addRow(column: 0))
+        #expect(target(.backtab, 0, 0) == .cell(row: 0, column: 0))
+        #expect(target(.backtab, 3, 0) == .cell(row: 2, column: 1))
     }
 
-    @Test func fromACellsOuterEdgeArrowsLeaveTheRow() {
-        let text = "before\n| a | b |\n|---|---|\n| 1 | 2 |\nafter"
-        // ← from the header's first cell: up to the line above.
-        #expect(skip(text, to: 7, from: 9) == "before^\n| a | b |\n|---|---|\n| 1 | 2 |\nafter")
-        // → from the last row's last cell: down to the line below.
-        #expect(skip(text, to: 36, from: 35) == "before\n| a | b |\n|---|---|\n| 1 | 2 |\n^after")
-        // → from the header's last cell: past the hidden row into the body.
-        #expect(skip(text, to: 16, from: 15) == "before\n| a | b |\n|---|---|\n| 1^ | 2 |\nafter")
-        // ← from the body's first cell: back over the hidden row to the header's end.
-        #expect(skip(text, to: 27, from: 29) == "before\n| a | b^ |\n|---|---|\n| 1 | 2 |\nafter")
+    @Test func columnAlignmentComesFromTheDelimiterRow() {
+        let text = "| a | b | c |\n|:--|:-:|--:|" as NSString
+        let table = TableEditing.table(at: 0, in: text, blockMap: BlockMap(text: text))!
+        #expect((0..<3).map { TableEditing.alignment(ofColumn: $0, in: table, text: text) } == [.left, .center, .right])
+        #expect(TableEditing.alignment(ofColumn: 5, in: table, text: text) == .left)
     }
 
-    @Test func withoutBodyRowsTheCursorLeavesTheTableDownwards() {
-        #expect(skip("| A |\n|---|\nnext", to: 8, from: 2) == "| A |\n|---|\n^next")
-        #expect(skip("| A |\n|---|", to: 8, from: 2) == "| A^ |\n|---|")  // nowhere below: the header
-    }
-
-    @Test func backspaceAndDeleteDontRemoveThePipes() {
-        let text = "| a | b |\n|---|---|\n| 1 | 2 |" as NSString
-        let map = BlockMap(text: text)
-        func blocked(_ location: Int, forward: Bool) -> Bool {
-            let edit = TableEditing.editForDelete(forward: forward, in: text, selection: NSRange(location: location, length: 0), blockMap: map)
-            if let edit { #expect(edit.isNoChange) }
-            return edit != nil
-        }
-        #expect(blocked(5, forward: false))   // after the pipe between "a" and "b"
-        #expect(blocked(4, forward: true))    // before it
-        #expect(blocked(1, forward: false))   // after the row's first pipe
-        #expect(!blocked(3, forward: false))  // deleting "a" is fine
-        #expect(!blocked(7, forward: true))
-        let plain = "a | b" as NSString
-        #expect(TableEditing.editForDelete(forward: false, in: plain, selection: NSRange(location: 3, length: 0),
-                                           blockMap: BlockMap(text: plain)) == nil)  // not a table
+    @Test func returnGoesDownAddsARowAndLeavesOnAnEmptyLastRow() {
+        #expect(target(.newline, 0, 1) == .cell(row: 2, column: 1))
+        #expect(target(.newline, 3, 1) == .addRow(column: 1))  // the last row has text
+        let empty = "| A | B |\n|---|---|\n| 1 | 2 |\n|  |  |" as NSString
+        #expect(target(.newline, 3, 0, in: empty) == .removeLastRowAndLeave)
+        let edit = TableEditing.editRemovingLastRow(of: TableEditing.table(at: 0, in: empty, blockMap: BlockMap(text: empty))!, in: empty)
+        #expect(edit.applied(to: empty as String) == "| A | B |\n|---|---|\n| 1 | 2 |\n")
+        #expect(edit.selectionAfter == NSRange(location: empty.length - 7, length: 0))
+        // The header row is never removed.
+        let headerOnly = "|  |  |\n|---|---|" as NSString
+        #expect(target(.newline, 0, 0, in: headerOnly) == .addRow(column: 0))
     }
 }
 
-struct TableNavigationTests {
-    private let text = "| test | Column 2 |\n| --- | --- |\n|  |  |\n| afs |  |\n|  |  |" as NSString
-
-    private func move(up: Bool, from location: Int) -> Int? {
-        TableEditing.caretForVerticalMove(up: up, in: text, selection: NSRange(location: location, length: 0),
-                                          blockMap: BlockMap(text: text))
+struct TableCellTextTests {
+    @Test func lineBreaksAndPipesShowAsTheyRead() {
+        let cell = TableCellText(markdown: "one<br>two<BR/>three \\| four")
+        #expect(cell.editorText == "one\ntwo\nthree | four")
+        #expect(TableCellText(markdown: "a\\|b").editorText == "a|b")
+        #expect(TableCellText(markdown: "<br><br>").editorText == "\n\n")
     }
 
-    /// The report: up from the first body row went to the other column's
-    /// header, and the next down jumped back to the first column.
-    @Test func upAndDownStayInTheColumn() {
-        let firstBodyColumn1 = text.range(of: "|  |  |").location + 2   // after "| "
-        let header1End = text.range(of: "test").upperBound
-        #expect(move(up: true, from: firstBodyColumn1) == text.range(of: "test").location)
-        #expect(move(up: false, from: header1End) == firstBodyColumn1)  // past the hidden row
-        let afs = text.range(of: "afs")
-        #expect(move(up: false, from: firstBodyColumn1) == afs.location)
-        #expect(move(up: true, from: afs.upperBound) == firstBodyColumn1)  // an empty cell: its start
-        // The place in the text is kept where it fits.
-        #expect(move(up: true, from: afs.location + 2) == firstBodyColumn1)
-        #expect(move(up: false, from: text.range(of: "test").location + 2) == firstBodyColumn1)
-        // Column 2 stays column 2.
-        let column2 = text.range(of: "Column 2")
-        let body2 = move(up: false, from: column2.location)!
-        #expect(TableEditing.table(at: body2, in: text, blockMap: BlockMap(text: text))?.position(of: body2)?.column == 1)
+    @Test func editorTextIsWrittenBackAsMarkdown() {
+        #expect(TableCellText.markdown(fromEditorText: "one\ntwo") == "one<br>two")
+        #expect(TableCellText.markdown(fromEditorText: "a|b") == "a\\|b")
+        #expect(TableCellText.markdown(fromEditorText: "a\\|b") == "a\\|b")  // already escaped
+        #expect(TableCellText.markdown(fromEditorText: "x\r\ny") == "x<br>y")
+        // Round trip.
+        let markdown = "one<br>two \\| three<br>"
+        #expect(TableCellText.markdown(fromEditorText: TableCellText(markdown: markdown).editorText) == markdown)
     }
 
-    @Test func aboveTheHeaderAndBelowTheLastRowTheCursorLeaves() {
-        #expect(move(up: true, from: 3) == nil)
-        #expect(move(up: false, from: text.length - 2) == nil)
-        #expect(move(up: true, from: 0) == nil)  // on the pipe: still the header row
-    }
-
-    @Test func shiftReturnInACellWritesABreak() {
-        let location = text.range(of: "afs").upperBound
-        let edit = TableEditing.editForLineBreak(in: text, selection: NSRange(location: location, length: 0),
-                                                 blockMap: BlockMap(text: text))
-        #expect(edit.map { $0.applied(to: text as String) }?.contains("| afs<br> |") == true)
-        #expect(edit?.selectionAfter == NSRange(location: location + 4, length: 0))
-        let plain = "a line" as NSString
-        #expect(TableEditing.editForLineBreak(in: plain, selection: NSRange(location: 2, length: 0),
-                                              blockMap: BlockMap(text: plain)) == nil)
-        // Shown dimmed, as a line break.
-        let cell = "| a<br>b |\n|---|" as NSString
-        #expect(MarkdownStyler.spans(in: cell, blocks: BlockMap(text: cell).blocks)
-            .contains { $0.style == .lineBreak && cell.substring(with: $0.range) == "<br>" })
-    }
-}
-
-struct TableHorizontalMoveTests {
-    private let text = "before\n| ab | c |\n|---|---|\n|  | d |\nafter" as NSString
-
-    private func move(forward: Bool, from location: Int) -> Int? {
-        TableEditing.caretForHorizontalMove(forward: forward, in: text, selection: NSRange(location: location, length: 0),
-                                            blockMap: BlockMap(text: text))
-    }
-    private func at(_ piece: String) -> NSRange { text.range(of: piece) }
-
-    /// The report: → needed two presses to get from one cell to the next.
-    @Test func oneArrowPressCrossesIntoTheNextCell() {
-        let ab = at("ab"), c = at("c |").location, d = at("d").location
-        #expect(move(forward: true, from: ab.location) == nil)  // inside the text: the usual move
-        #expect(move(forward: true, from: ab.upperBound) == c)  // end of "ab" → start of "c"
-        #expect(move(forward: false, from: c) == ab.upperBound)
-        let emptyCell = at("|  |").location + 2
-        #expect(move(forward: true, from: c + 1) == emptyCell)  // last header cell → first body cell
-        #expect(move(forward: true, from: emptyCell) == d)      // an empty cell is crossed in one press
-        #expect(move(forward: false, from: d) == emptyCell)
-        #expect(move(forward: false, from: emptyCell) == c + 1)  // back over the hidden row
-    }
-
-    @Test func pastTheFirstOrLastCellTheCursorLeavesTheTable() {
-        #expect(move(forward: false, from: at("ab").location) == at("before").upperBound)
-        #expect(move(forward: true, from: at("d").upperBound) == at("after").location)
-    }
-
-    @Test func fromTheHiddenSpacesTheCursorStepsIntoTheText() {
-        let ab = at("ab")
-        #expect(move(forward: true, from: ab.location - 1) == ab.location + 1)   // after the pipe, before the space
-        #expect(move(forward: false, from: ab.upperBound + 1) == ab.upperBound - 1)
-    }
-}
-
-/// Cells with `<br>`: shown as lines, so the cursor moves along those lines.
-struct TableCellLineTests {
-    private let text = "| Name | Notes |\n| --- | --- |\n| Al | one<br>two<br><br>four |\n| Bo | x |" as NSString
-    private var map: BlockMap { BlockMap(text: text) }
-    private func at(_ piece: String) -> NSRange { text.range(of: piece) }
-    private func cursor(_ location: Int) -> NSRange { NSRange(location: location, length: 0) }
-
-    @Test func aCellsLinesAreSplitAtItsBreaks() {
-        let cell = NSRange(location: at(" one").location, length: at(" |\n| Bo").location - at(" one").location + 1)
-        let lines = TableEditing.cellLines(of: cell, in: text).map { text.substring(with: $0) }
-        #expect(lines == ["one", "two", "", "four"])
-        #expect(TableEditing.cellLines(of: NSRange(location: at(" x").location, length: 3), in: text).count == 1)
-    }
-
-    @Test func upAndDownMoveBetweenACellsLinesFirst() {
-        let two = at("two")
-        #expect(TableEditing.caretForVerticalMove(up: true, in: text, selection: cursor(two.location + 2), blockMap: map)
-                == at("one").location + 2)
-        let empty = at("<br><br>").location + 4
-        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(two.upperBound), blockMap: map) == empty)
-        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(empty), blockMap: map)
-                == at("four").location)
-        // Down from the last line: the next row; up from the row below: the last line.
-        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(at("four").location + 1), blockMap: map)
-                == at("x").location + 1)
-        #expect(TableEditing.caretForVerticalMove(up: true, in: text, selection: cursor(at("x").location), blockMap: map)
-                == at("four").location)
-        // Up from the header cell above's row: down into the first line.
-        #expect(TableEditing.caretForVerticalMove(up: false, in: text, selection: cursor(at("Notes").location), blockMap: map)
-                == at("one").location)
-    }
-
-    @Test func leftAndRightStepOverABreak() {
-        #expect(TableEditing.caretForHorizontalMove(forward: true, in: text, selection: cursor(at("one").upperBound), blockMap: map)
-                == at("two").location)
-        #expect(TableEditing.caretForHorizontalMove(forward: false, in: text, selection: cursor(at("two").location), blockMap: map)
-                == at("one").upperBound)
-        #expect(TableEditing.caretForHorizontalMove(forward: true, in: text, selection: cursor(at("one").location + 1), blockMap: map) == nil)
-    }
-
-    @Test func backspaceAtALinesStartJoinsItToTheLineAbove() {
-        let edit = TableEditing.editForDelete(forward: false, in: text, selection: cursor(at("two").location), blockMap: map)
-        #expect(edit.map { $0.applied(to: text as String) }?.contains("| one two<br><br>four |") == false)
-        #expect(edit.map { $0.applied(to: text as String) }?.contains("| onetwo<br><br>four |") == true)
-        #expect(edit?.selectionAfter == cursor(at("one").upperBound))
-        let forward = TableEditing.editForDelete(forward: true, in: text, selection: cursor(at("two").upperBound), blockMap: map)
-        #expect(forward.map { $0.applied(to: text as String) }?.contains("one<br>two<br>four") == true)
-    }
-
-    @Test func aCursorInsideABreakMovesOutOfIt() {
-        let br = at("<br>two")
-        #expect(TableEditing.adjustedCaret(br.location + 2, from: br.location, in: text, blockMap: map) == at("two").location)
-        #expect(TableEditing.adjustedCaret(br.location + 2, from: at("two").location, in: text, blockMap: map) == at("one").upperBound)
-        #expect(TableEditing.adjustedCaret(at("one").location + 1, from: 0, in: text, blockMap: map) == nil)
+    @Test func offsetsMapBothWays() {
+        let cell = TableCellText(markdown: "ab<br>cd\\|e")  // editor: "ab\ncd|e"
+        #expect(cell.editorText == "ab\ncd|e")
+        #expect(cell.markdownOffset(forEditorOffset: 3) == 6)   // "c"
+        #expect(cell.markdownOffset(forEditorOffset: 5) == 8)   // the "\\|"
+        #expect(cell.markdownOffset(forEditorOffset: 7) == 11)  // the end
+        #expect(cell.editorOffset(forMarkdownOffset: 6) == 3)
+        #expect(cell.editorOffset(forMarkdownOffset: 4) == 2)   // inside "<br>": before it
+        #expect(cell.editorRange(forMarkdownRange: NSRange(location: 6, length: 2)) == NSRange(location: 3, length: 2))
+        #expect(cell.editorRange(forMarkdownRange: NSRange(location: 0, length: 4)) == NSRange(location: 0, length: 3))
     }
 }

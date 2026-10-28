@@ -22,8 +22,6 @@ final class MarkdownTextView: NSTextView {
     /// Called when a table's "+" button is clicked or a table item is chosen from
     /// the context menu: the operation, and a location in the row/cell it's for.
     var onTableOperation: (_ operation: TableOperation, _ location: Int) -> Void = { _, _ in }
-    /// True if `location` is inside a table (decides whether the context menu offers table items).
-    var isInTable: (_ location: Int) -> Bool = { _ in false }
 
     private static let verticalInset: CGFloat = 20
     /// Extra room under the text (see StyleApplier.updateTrailingSpace). The
@@ -47,12 +45,9 @@ final class MarkdownTextView: NSTextView {
     /// Called with files dropped or pasted into the editor and where they go.
     var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
 
-    /// Table cells with `<br>` (MarkdownTextView+TableCells): the overlay that
-    /// draws the cursor there, whether the system cursor is hidden for it, and a
-    /// drag that started in such a cell.
-    let cellOverlay = TableCellOverlayView()
-    var hidesSystemCursor = false
-    var cellDrag: (anchor: Int, cell: DrawnCell)?
+    /// Called with a table cell's location (just after its opening pipe) when
+    /// it's clicked; the cell editor takes over the click.
+    var onTableCellClick: (_ cell: Int, _ event: NSEvent) -> Void = { _, _ in }
 
     /// The image being resized: its syntax, width and where the drag started.
     private var resizing: (range: NSRange, startWidth: CGFloat, startX: CGFloat, width: CGFloat)?
@@ -80,7 +75,10 @@ final class MarkdownTextView: NSTextView {
             }
             return
         }
-        if clickDrawnCell(at: point, with: event) { return }
+        if let cell = tableCellHit(at: point) {
+            onTableCellClick(cell.location, event)
+            return
+        }
         guard let box = taskBoxLocation(at: point) else {
             super.mouseDown(with: event)
             return
@@ -90,7 +88,6 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if dragInDrawnCell(to: convert(event.locationInWindow, from: nil)) { return }
         guard let current = resizing else { return super.mouseDragged(with: event) }
         let x = convert(event.locationInWindow, from: nil).x
         let maxWidth = (textContainer?.size.width ?? bounds.width) - 2 * (textContainer?.lineFragmentPadding ?? 0)
@@ -101,10 +98,6 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if cellDrag != nil {
-            cellDrag = nil
-            return
-        }
         guard let finished = resizing else { return super.mouseUp(with: event) }
         resizing = nil
         onImageResize(finished.range, finished.width, true)
@@ -163,6 +156,84 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
+    /// The table cell under `point`: where it starts in the text (just after its
+    /// opening pipe) and its area, grid lines to grid lines (view coordinates).
+    func tableCellHit(at point: NSPoint) -> (location: Int, frame: CGRect)? {
+        guard let (fragment, inFragment) = decoratedFragment(at: point), let row = fragment.tableRow,
+              !row.isDelimiter, inFragment.y >= 0, inFragment.y <= row.height, let layout = textLayoutManager
+        else { return nil }
+        let rowStart = layout.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
+        let origin = fragmentOrigin(fragment)
+        for (index, cell) in row.cells.enumerated() {
+            let column = min(index, row.columnLines.count - 2)
+            let area = CGRect(x: row.columnLines[column], y: 0,
+                              width: row.columnLines[column + 1] - row.columnLines[column], height: row.height)
+            guard area.contains(inFragment) else { continue }
+            return (rowStart + cell.range.location, area.offsetBy(dx: origin.x, dy: origin.y))
+        }
+        return nil
+    }
+
+    /// Where the text of the table cell starting at `location` goes (view
+    /// coordinates), and the cell's layout. Lays the row out first if needed.
+    func tableCellTextFrame(at location: Int) -> (frame: CGRect, cell: TableRowLayout.Cell)? {
+        guard let layout = textLayoutManager, let start = layOutTable(through: location),
+              let fragment = layout.textLayoutFragment(for: start) as? DecoratedLayoutFragment,
+              let row = fragment.tableRow else { return nil }
+        let rowStart = layout.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
+        guard let cell = row.cells.first(where: { rowStart + $0.range.location == location }) else { return nil }
+        let origin = fragmentOrigin(fragment)
+        return (cell.frame.offsetBy(dx: origin.x, dy: origin.y), cell)
+    }
+
+    /// The cell of the table row holding `location` that is under `x` (view
+    /// coordinates), by where it starts in the text.
+    func tableCell(inRowAt location: Int, x: CGFloat) -> Int? {
+        guard let layout = textLayoutManager, let start = layOutTable(through: location),
+              let fragment = layout.textLayoutFragment(for: start) as? DecoratedLayoutFragment,
+              let row = fragment.tableRow, !row.cells.isEmpty else { return nil }
+        let rowStart = layout.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
+        let inRow = x - fragmentOrigin(fragment).x
+        let column = (row.columnLines.indices.dropFirst().first { inRow < row.columnLines[$0] } ?? row.columnLines.count - 1) - 1
+        return rowStart + row.cells[min(max(column, 0), row.cells.count - 1)].range.location
+    }
+
+    /// Where the cursor is across, in view coordinates.
+    var caretX: CGFloat {
+        guard let window else { return 0 }
+        let onScreen = firstRect(forCharacterRange: NSRange(location: selectedRange().location, length: 0), actualRange: nil)
+        return convert(window.convertFromScreen(onScreen), from: nil).minX
+    }
+
+    /// Lays out the table row at `location` where it's drawn, and returns that
+    /// location. Restyling a table drops its rows' layout, and a row laid out on
+    /// its own is placed by an estimate (a line off, after a row grew): the
+    /// viewport's layout, which drawing uses, places it after the text above.
+    private func layOutTable(through location: Int) -> NSTextLocation? {
+        guard let layout = textLayoutManager, let storage = textStorage, location <= storage.length,
+              let target = layout.location(layout.documentRange.location, offsetBy: location) else { return nil }
+        let viewport = layout.textViewportLayoutController
+        viewport.layoutViewport()
+        if viewport.viewportRange?.contains(target) == true { return target }
+        // Off screen: from the table's first row, which is close enough.
+        let text = storage.mutableString
+        var firstRow = text.paragraphRange(for: NSRange(location: min(location, max(storage.length - 1, 0)), length: 0)).location
+        while firstRow > 0, storage.attribute(EditorTheme.tableRowKey, at: firstRow - 1, effectiveRange: nil) is TableRowLayout {
+            firstRow = text.paragraphRange(for: NSRange(location: firstRow - 1, length: 0)).location
+        }
+        if let from = layout.location(layout.documentRange.location, offsetBy: firstRow),
+           let range = NSTextRange(location: from, end: layout.location(target, offsetBy: 1) ?? target) {
+            layout.ensureLayout(for: range)
+        }
+        return target
+    }
+
+    /// A layout fragment's origin in view coordinates.
+    private func fragmentOrigin(_ fragment: NSTextLayoutFragment) -> CGPoint {
+        let container = textContainerOrigin
+        return CGPoint(x: container.x + fragment.layoutFragmentFrame.minX, y: container.y + fragment.layoutFragmentFrame.minY)
+    }
+
     /// The decorated layout fragment under `point` (view coordinates), and the point in its coordinates.
     func decoratedFragment(at point: NSPoint) -> (DecoratedLayoutFragment, CGPoint)? {
         guard let layout = textLayoutManager else { return nil }
@@ -184,11 +255,16 @@ final class MarkdownTextView: NSTextView {
 
     /// Right-clicking in a table adds row and column items above the usual ones.
     override func menu(for event: NSEvent) -> NSMenu? {
-        let location = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
-        guard isInTable(location) else { return super.menu(for: event) }
+        guard let cell = tableCellHit(at: convert(event.locationInWindow, from: nil)) else { return super.menu(for: event) }
         // A copy: NSTextView hands out one shared menu, which must not keep our items.
         let menu = (super.menu(for: event)?.copy() as? NSMenu) ?? NSMenu()
-        if !NSLocationInRange(location, selectedRange()) { setSelectedRange(NSRange(location: location, length: 0)) }
+        addTableItems(to: menu, location: cell.location)
+        return menu
+    }
+
+    /// Puts the table's row and column items at the top of `menu`, acting on the
+    /// cell at `location` (also used by the cell editor's menu).
+    func addTableItems(to menu: NSMenu, location: Int) {
         let items: [(String, TableOperation)?] = [
             ("Add Row Above", .addRowAbove), ("Add Row Below", .addRowBelow), nil,
             ("Add Column Left", .addColumnLeft), ("Add Column Right", .addColumnRight), nil,
@@ -206,7 +282,6 @@ final class MarkdownTextView: NSTextView {
             item.representedObject = TableMenuAction(operation: operation, location: location)
             menu.insertItem(item, at: index)
         }
-        return menu
     }
 
     @objc private func runTableMenuItem(_ item: NSMenuItem) {
@@ -268,34 +343,15 @@ final class MarkdownTextView: NSTextView {
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        if accepted {
-            onFocusChange(true)
-            updateDrawnCellCursor()
-        }
+        if accepted { onFocusChange(true) }
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
         let accepted = super.resignFirstResponder()
-        if accepted {
-            onFocusChange(false)
-            updateDrawnCellCursor()
-        }
+        if accepted { onFocusChange(false) }
         return accepted
     }
-
-    /// The drawn cursor in table cells shows only while the window is active.
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
-        guard let window else { return }
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-            NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged), name: name, object: window)
-        }
-    }
-
-    @objc private func windowKeyChanged() { updateDrawnCellCursor() }
 
     /// Builds a TextKit 2 text view inside a scroll view, ready for the editor.
     static func makeScrollableEditor() -> (NSScrollView, MarkdownTextView) {

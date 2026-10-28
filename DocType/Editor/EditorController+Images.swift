@@ -1,6 +1,7 @@
 // Images in the open note: finding their files, measuring them before the note
-// appears, redrawing when thumbnails arrive or the editor's width changes, and
-// resizing by dragging the handle (written back as "alt|width", one undo step).
+// appears, redrawing when thumbnails arrive or the editor's width changes (tables
+// too: their columns fit the width), and resizing by dragging the handle
+// (written back as "alt|width", one undo step).
 
 import AppKit
 import DocTypeCore
@@ -62,6 +63,18 @@ extension EditorController {
         if !ranges.isEmpty { styler.restyle(ranges, in: storage) }
     }
 
+    /// Lays tables out again (their columns fit the editor's width) and moves
+    /// the cell editor with its cell.
+    private func redrawTables() {
+        guard let storage = textView.textStorage, storage.length > 0 else { return }
+        var rows: [NSRange] = []
+        storage.enumerateAttribute(EditorTheme.tableRowKey, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if value != nil { rows.append(range) }
+        }
+        if !rows.isEmpty { styler.restyle(rows, in: storage) }
+        tableCells.placeEditor()
+    }
+
     private func editorWidthChanged() {
         let width = textView.frame.width
         guard abs(width - lastLayoutWidth) >= 1 else { return }
@@ -71,6 +84,7 @@ extension EditorController {
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled else { return }
             self?.redrawImages { _ in true }
+            self?.redrawTables()
         }
     }
 

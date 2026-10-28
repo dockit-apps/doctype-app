@@ -18,11 +18,8 @@ enum EditorTheme {
     static let bulletKey = NSAttributedString.Key("DocTypeBullet")
     /// Marks a task's "[ ]" (drawn as a checkbox); the value is true when checked.
     static let taskKey = NSAttributedString.Key("DocTypeTask")
-    /// Marks a table row's line, for drawing the grid (value: TableRowAttribute).
+    /// Marks a table row's line, for drawing it and finding its cells (value: TableRowLayout).
     static let tableRowKey = NSAttributedString.Key("DocTypeTableRow")
-    /// Marks a table's pipe characters, where the grid's vertical lines go. The
-    /// value is the line's offset into the (stretched) pipe; see EditorTheme+Tables.
-    static let tablePipeKey = NSAttributedString.Key("DocTypeTablePipe")
     /// Marks a link's text; the value is its destination (⌘-click opens it).
     static let linkKey = NSAttributedString.Key("DocTypeLink")
     /// Space between the quote bar and the quoted text.
@@ -55,13 +52,13 @@ enum EditorTheme {
     /// measuring before they can be shown (see EditorTheme+Images).
     @discardableResult
     static func apply(_ spans: [StyleSpan], to text: NSMutableAttributedString, resetting range: NSRange,
-                      selection: NSRange, images: ImageContext? = nil) -> [URL] {
+                      selection: NSRange, images: ImageContext? = nil, tables: TableContext? = nil) -> [URL] {
         text.setAttributes(baseAttributes, range: range)
         var unmeasuredImages: [URL] = []
         for span in spans where !span.isHeldBack(by: selection) {
             switch span.style {
-            case .tableRow(let index, let isLast):
-                applyTableRow(span, index: index, isLast: isLast, to: text, selection: selection)
+            case .tableRow, .tableCell, .tablePipe:
+                break  // laid out together, after the cells' text is styled (EditorTheme+Tables)
             case .image(let source, let width):
                 if let url = applyImage(span, source: source, width: width, to: text, selection: selection, context: images) {
                     unmeasuredImages.append(url)
@@ -88,7 +85,7 @@ enum EditorTheme {
                 text.addAttributes(attributes(for: span.style), range: span.range)
             }
         }
-        alignTableColumns(spans, in: text)
+        layOutTables(spans, in: text, selection: selection, context: tables)
         reserveImageSpace(in: range, of: text)
         return unmeasuredImages
     }
@@ -119,10 +116,7 @@ enum EditorTheme {
         case .taskBox(let checked):
             // Keeps its width; BlockDecorations draws a checkbox there.
             [.foregroundColor: NSColor.clear, taskKey: checked]
-        case .tablePipe:
-            // Stretched to space the columns, and the grid line drawn in it (EditorTheme+Tables).
-            [.foregroundColor: NSColor.clear]
-        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell, .tableRow, .image:
+        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell, .tableRow, .tablePipe, .image:
             [:]  // handled in apply(_:to:resetting:selection:)
         }
     }
@@ -142,31 +136,9 @@ enum EditorTheme {
 
     // MARK: - Tables
 
-    /// Room above and below each row's text, inside the grid.
-    nonisolated static let tableRowPadding: CGFloat = 5
     nonisolated static let tableLineSpacing: CGFloat = 3
     /// Extra room under a table's last row for its "add row" button.
     nonisolated static let tableButtonSpace: CGFloat = 20
-
-    /// Marks a table row's line and pads it. The `|---|` row collapses to almost
-    /// nothing (its line break is hidden too).
-    private static func applyTableRow(_ span: StyleSpan, index: Int, isLast: Bool, to text: NSMutableAttributedString,
-                                      selection: NSRange) {
-        let paragraph = text.mutableString.paragraphRange(for: NSRange(location: span.range.location, length: 0))
-        let isActive = span.isRevealed(by: selection)
-        let style = NSMutableParagraphStyle()
-        if index == 1 {  // the |---| row, always hidden
-            text.addAttributes(concealedAttributes, range: paragraph)
-            style.maximumLineHeight = 1
-        } else {
-            style.lineSpacing = tableLineSpacing
-            style.paragraphSpacingBefore = tableRowPadding
-            style.paragraphSpacing = tableRowPadding + (isLast ? tableButtonSpace : 0)
-        }
-        text.addAttributes([.paragraphStyle: style,
-                            tableRowKey: TableRowAttribute(index: index, isLast: isLast, isActive: isActive)],
-                           range: paragraph)
-    }
 
     private static let quoteParagraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
@@ -245,14 +217,4 @@ enum EditorTheme {
                            blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
         }
     }
-}
-
-/// What's stored on a table row's line, for BlockDecorations.
-nonisolated struct TableRowAttribute: Hashable, Sendable {
-    let index: Int
-    let isLast: Bool
-    /// The cursor is in the table: its "add row" and "add column" buttons show.
-    let isActive: Bool
-    /// Room added under the row's text for cells drawn on several lines (`<br>`).
-    var extraHeight: CGFloat = 0
 }

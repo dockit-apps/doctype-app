@@ -26,6 +26,9 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     private var styledSelection = NSRange(location: 0, length: 0)
     /// How to find the open note's images; nil shows image syntax as text.
     var imageContext: ImageContext?
+    /// The table cell being edited (see TableCellSession); tables take their
+    /// width from the editor.
+    var editingTableCell: (location: Int, height: CGFloat)?
     /// Called with images found while styling `range` that need measuring first;
     /// restyle the range once they are.
     var onUnmeasuredImages: (_ urls: [URL], _ range: NSRange) -> Void = { _, _ in }
@@ -39,6 +42,15 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         return context
     }
 
+    /// How wide tables may get, and the cell being edited.
+    private var currentTableContext: TableContext {
+        var context = TableContext(editingCell: editingTableCell)
+        if let container = textView?.textContainer, container.size.width > 100 {
+            context.width = container.size.width - 2 * container.lineFragmentPadding
+        }
+        return context
+    }
+
     /// Replaces the whole text with an already-styled document (opening a note).
     /// `selection` is where the cursor will be, which decides the visible markers.
     func replaceDocument(in storage: NSTextStorage, text: String, blockMap: BlockMap, spans: [StyleSpan],
@@ -46,7 +58,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         let attributed = NSMutableAttributedString(string: text)
         let whole = NSRange(location: 0, length: attributed.length)
         let unmeasured = EditorTheme.apply(spans, to: attributed, resetting: whole, selection: selection,
-                                           images: currentImageContext)
+                                           images: currentImageContext, tables: currentTableContext)
         // The new map goes in before the new text, and nothing restyles during the
         // swap: TextKit adjusts the selection (and tells the delegate) in the middle
         // of it, while the text is already styled for `selection`.
@@ -178,7 +190,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     private func apply(_ range: NSRange, in storage: NSTextStorage, selection: NSRange) {
         let spans = MarkdownStyler.spans(in: storage.mutableString, blocks: blockMap.blocks(in: range))
         let unmeasured = EditorTheme.apply(spans, to: storage, resetting: range, selection: selection,
-                                           images: currentImageContext)
+                                           images: currentImageContext, tables: currentTableContext)
         if !unmeasured.isEmpty { onUnmeasuredImages(unmeasured, range) }
     }
 

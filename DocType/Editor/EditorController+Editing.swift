@@ -1,6 +1,6 @@
 // Editing behaviors on top of plain typing: Return, Backspace and Tab in lists and
 // quotes, task box clicks, keeping the cursor out of hidden syntax, and applying
-// core TextEdits as one undo step.
+// core TextEdits as one undo step. (Typing in tables: TableCellSession.)
 
 import AppKit
 import DocTypeCore
@@ -23,43 +23,23 @@ extension EditorController {
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         guard !textView.hasMarkedText(), let text = textView.textStorage?.mutableString else { return false }
         let selection = textView.selectedRange()
-        let newline = {
-            CodeFenceEditing.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
-                ?? TableEditing.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
-                ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
-                ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: self.styler.blockMap)
+        if selector == #selector(NSResponder.moveUp(_:)) || selector == #selector(NSResponder.moveDown(_:)) {
+            // Moving into a table opens the cell in the column the cursor is in.
+            pendingVerticalMove = (self.textView.caretX, selector == #selector(NSResponder.moveUp(_:)))
+            return false
         }
         let edit: TextEdit? = switch selector {
-        case #selector(NSResponder.insertNewline(_:)) where NSApp.currentEvent?.modifierFlags.contains(.shift) == true:
-            // Shift-Return: a line break inside a table cell; elsewhere a normal Return.
-            TableEditing.editForLineBreak(in: text, selection: selection, blockMap: styler.blockMap) ?? newline()
-        case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-            // Option-Return: the same in a cell; elsewhere a plain line break.
-            TableEditing.editForLineBreak(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertNewline(_:)):
-            newline()
+            CodeFenceEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+                ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+                ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.deleteBackward(_:)):
-            TableEditing.editForDelete(forward: false, in: text, selection: selection, blockMap: styler.blockMap)
-                ?? ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+            ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
-        case #selector(NSResponder.moveLeft(_:)), #selector(NSResponder.moveRight(_:)):
-            TableEditing.caretForHorizontalMove(forward: selector == #selector(NSResponder.moveRight(_:)), in: text,
-                                                selection: selection, blockMap: styler.blockMap)
-                .map { TextEdit(range: NSRange(location: selection.location, length: 0), replacement: "",
-                                selectionAfter: NSRange(location: $0, length: 0)) }
-        case #selector(NSResponder.moveUp(_:)), #selector(NSResponder.moveDown(_:)):
-            TableEditing.caretForVerticalMove(up: selector == #selector(NSResponder.moveUp(_:)), in: text,
-                                              selection: selection, blockMap: styler.blockMap)
-                .map { TextEdit(range: NSRange(location: selection.location, length: 0), replacement: "",
-                                selectionAfter: NSRange(location: $0, length: 0)) }
-        case #selector(NSResponder.deleteForward(_:)):
-            TableEditing.editForDelete(forward: true, in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertTab(_:)):
-            TableEditing.editForTab(forward: true, in: text, selection: selection, blockMap: styler.blockMap)
-                ?? ListIndentation.edit(.indent, in: text, selection: selection, blockMap: styler.blockMap)
+            ListIndentation.edit(.indent, in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertBacktab(_:)):
-            TableEditing.editForTab(forward: false, in: text, selection: selection, blockMap: styler.blockMap)
-                ?? ListIndentation.edit(.outdent, in: text, selection: selection, blockMap: styler.blockMap)
+            ListIndentation.edit(.outdent, in: text, selection: selection, blockMap: styler.blockMap)
         default:
             nil
         }
@@ -68,8 +48,13 @@ extension EditorController {
         return true
     }
 
-    /// Runs a Format menu transform (core `Formatting`) on the text and selection.
+    /// Runs a Format menu transform (core `Formatting`) on the text and
+    /// selection: the note's, or the table cell's being edited.
     func format(_ transform: (NSString, NSRange) -> TextEdit) {
+        if tableCells.isEditing {
+            tableCells.format(transform)
+            return
+        }
         guard let text = textView.textStorage?.mutableString else { return }
         apply(transform(text, textView.selectedRange()))
     }
@@ -97,8 +82,7 @@ extension EditorController {
     ) -> NSRange {
         guard let text = textView.textStorage?.mutableString else { return newRange }
         let outOfQuote = QuoteEditing.adjustedSelection(from: oldRange, to: newRange, in: text, blockMap: styler.blockMap)
-        let adjusted = ListContinuation.adjustedSelection(from: oldRange, to: outOfQuote, in: text, blockMap: styler.blockMap)
-        return selectionInTableCells(from: oldRange, to: adjusted)
+        return ListContinuation.adjustedSelection(from: oldRange, to: outOfQuote, in: text, blockMap: styler.blockMap)
     }
 
     /// Right after hidden syntax, NSTextView would copy its zero-size font into the
