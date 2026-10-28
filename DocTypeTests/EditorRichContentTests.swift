@@ -506,6 +506,13 @@ struct EditorRichContentTests {
             #expect(column() == 1)
         }
 
+        // ← / →: one press from one cell's text to the next.
+        textView.setSelectedRange(NSRange(location: string.range(of: "test").upperBound, length: 0))
+        textView.doCommand(by: #selector(NSResponder.moveRight(_:)))
+        #expect(textView.selectedRange().location == string.range(of: "Column 2").location)
+        textView.doCommand(by: #selector(NSResponder.moveLeft(_:)))
+        #expect(textView.selectedRange().location == string.range(of: "test").upperBound)
+
         textView.setSelectedRange(NSRange(location: string.range(of: "afs").upperBound, length: 0))
         textView.doCommand(by: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
         textView.insertText("x", replacementRange: textView.selectedRange())

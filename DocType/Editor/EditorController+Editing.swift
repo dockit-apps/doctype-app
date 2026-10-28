@@ -42,6 +42,11 @@ extension EditorController {
             TableEditing.editForDelete(forward: false, in: text, selection: selection, blockMap: styler.blockMap)
                 ?? ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
+        case #selector(NSResponder.moveLeft(_:)), #selector(NSResponder.moveRight(_:)):
+            TableEditing.caretForHorizontalMove(forward: selector == #selector(NSResponder.moveRight(_:)), in: text,
+                                                selection: selection, blockMap: styler.blockMap)
+                .map { TextEdit(range: NSRange(location: selection.location, length: 0), replacement: "",
+                                selectionAfter: NSRange(location: $0, length: 0)) }
         case #selector(NSResponder.moveUp(_:)), #selector(NSResponder.moveDown(_:)):
             TableEditing.caretForVerticalMove(up: selector == #selector(NSResponder.moveUp(_:)), in: text,
                                               selection: selection, blockMap: styler.blockMap)

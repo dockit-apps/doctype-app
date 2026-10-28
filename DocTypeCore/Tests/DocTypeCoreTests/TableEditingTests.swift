@@ -263,3 +263,37 @@ struct TableNavigationTests {
             .contains { $0.style == .lineBreak && cell.substring(with: $0.range) == "<br>" })
     }
 }
+
+struct TableHorizontalMoveTests {
+    private let text = "before\n| ab | c |\n|---|---|\n|  | d |\nafter" as NSString
+
+    private func move(forward: Bool, from location: Int) -> Int? {
+        TableEditing.caretForHorizontalMove(forward: forward, in: text, selection: NSRange(location: location, length: 0),
+                                            blockMap: BlockMap(text: text))
+    }
+    private func at(_ piece: String) -> NSRange { text.range(of: piece) }
+
+    /// The report: → needed two presses to get from one cell to the next.
+    @Test func oneArrowPressCrossesIntoTheNextCell() {
+        let ab = at("ab"), c = at("c |").location, d = at("d").location
+        #expect(move(forward: true, from: ab.location) == nil)  // inside the text: the usual move
+        #expect(move(forward: true, from: ab.upperBound) == c)  // end of "ab" → start of "c"
+        #expect(move(forward: false, from: c) == ab.upperBound)
+        let emptyCell = at("|  |").location + 2
+        #expect(move(forward: true, from: c + 1) == emptyCell)  // last header cell → first body cell
+        #expect(move(forward: true, from: emptyCell) == d)      // an empty cell is crossed in one press
+        #expect(move(forward: false, from: d) == emptyCell)
+        #expect(move(forward: false, from: emptyCell) == c + 1)  // back over the hidden row
+    }
+
+    @Test func pastTheFirstOrLastCellTheCursorLeavesTheTable() {
+        #expect(move(forward: false, from: at("ab").location) == at("before").upperBound)
+        #expect(move(forward: true, from: at("d").upperBound) == at("after").location)
+    }
+
+    @Test func fromTheHiddenSpacesTheCursorStepsIntoTheText() {
+        let ab = at("ab")
+        #expect(move(forward: true, from: ab.location - 1) == ab.location + 1)   // after the pipe, before the space
+        #expect(move(forward: false, from: ab.upperBound + 1) == ab.upperBound - 1)
+    }
+}

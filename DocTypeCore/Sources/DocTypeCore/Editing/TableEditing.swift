@@ -294,6 +294,48 @@ public enum TableEditing {
         return to.location + min(offset, to.length)
     }
 
+    /// ← / → in a table: within a cell's text, nil (the usual one-character
+    /// move); at its edge, straight to the next cell's text start (→) or the
+    /// previous cell's text end (←), on to the next or previous row, and out of
+    /// the table past its first or last cell. The spaces and pipes in between
+    /// are invisible, so stepping over them one by one looked like a stuck cursor.
+    public static func caretForHorizontalMove(forward: Bool, in text: NSString, selection: NSRange,
+                                              blockMap: BlockMap) -> Int? {
+        guard selection.length == 0, let table = table(at: selection.location, in: text, blockMap: blockMap),
+              let (row, column) = table.position(of: selection.location), row != 1,
+              column < table.cells[row].count else { return nil }
+        let location = selection.location
+        let content = contentRange(of: table.cells[row][column], in: text)
+        if content.length > 0 {
+            // In the hidden spaces before or after the text: step into it.
+            if forward, location < content.location {
+                return text.rangeOfComposedCharacterSequence(at: content.location).upperBound
+            }
+            if !forward, location > content.upperBound {
+                return text.rangeOfComposedCharacterSequence(at: content.upperBound - 1).location
+            }
+            if forward ? location < content.upperBound : location > content.location { return nil }
+        }
+        // At the edge: the neighboring cell, in reading order, skipping the |---| row.
+        var cells: [(row: Int, column: Int)] = []
+        for (index, rowCells) in table.cells.enumerated() where index != 1 {
+            cells += rowCells.indices.map { (index, $0) }
+        }
+        guard let current = cells.firstIndex(where: { $0.row == row && $0.column == column }) else { return nil }
+        let next = current + (forward ? 1 : -1)
+        guard cells.indices.contains(next) else {
+            // Past the table's first or last cell: the line before or after it.
+            if forward {
+                var lineEnd = 0
+                text.getLineStart(nil, end: &lineEnd, contentsEnd: nil, for: table.lines.last!)
+                return lineEnd > table.lines.last!.upperBound ? lineEnd : nil
+            }
+            return table.lines[0].location > 0 ? lineContaining(table.lines[0].location - 1, in: text).upperBound : nil
+        }
+        let target = contentRange(of: table.cells[cells[next].row][cells[next].column], in: text)
+        return forward ? target.location : target.upperBound
+    }
+
     /// Shift-Return or Option-Return in a cell: a line break, written `<br>` as
     /// on GitHub, since a real one would end the row. Nil outside tables.
     public static func editForLineBreak(in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
