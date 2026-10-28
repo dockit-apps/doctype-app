@@ -88,7 +88,7 @@ enum EditorTheme {
                 text.addAttributes(attributes(for: span.style), range: span.range)
             }
         }
-        alignTableColumns(spans, in: text)
+        alignTableColumns(spans, in: text, selection: selection)
         reserveImageSpace(in: range, of: text)
         return unmeasuredImages
     }
@@ -253,4 +253,6 @@ nonisolated struct TableRowAttribute: Hashable, Sendable {
     let isLast: Bool
     /// The cursor is in the table: its "add row" and "add column" buttons show.
     let isActive: Bool
+    /// Room added under the row's text for cells drawn on several lines (`<br>`).
+    var extraHeight: CGFloat = 0
 }

@@ -109,7 +109,15 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         let previous = styledSelection
         let text = storage.mutableString
         let clampedPrevious = Self.clamp(previous, toLength: text.length)
-        guard text.paragraphRange(for: clampedPrevious) != text.paragraphRange(for: selection) else {
+        let paragraph = text.paragraphRange(for: selection)
+        // Within a line nothing changes, except when the cursor moves to another
+        // cell of a table row with `<br>`s: the cell it's in shows its text, the
+        // others their lines.
+        let between = NSRange(location: min(clampedPrevious.location, selection.location),
+                              length: abs(clampedPrevious.location - selection.location))
+        guard text.paragraphRange(for: clampedPrevious) != paragraph
+                || (text.range(of: "|", range: between).location != NSNotFound
+                    && text.range(of: "<br", options: .caseInsensitive, range: paragraph).location != NSNotFound) else {
             styledSelection = selection
             return
         }
@@ -137,10 +145,19 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
             return union
         }
         guard !blockRanges.isEmpty else { return }
+        // The edit and the cursor are usually in the same block: style it once.
+        var merged: [NSRange] = []
+        for range in blockRanges.sorted(by: { $0.location < $1.location }) {
+            if let last = merged.last, range.location <= NSMaxRange(last) {
+                merged[merged.count - 1] = NSUnionRange(last, range)
+            } else {
+                merged.append(range)
+            }
+        }
         let selection = textView?.selectedRange() ?? NSRange(location: 0, length: 0)
         let restyle = {
             storage.beginEditing()
-            for range in blockRanges { self.apply(range, in: storage, selection: selection) }
+            for range in merged { self.apply(range, in: storage, selection: selection) }
             storage.endEditing()
         }
         if let contentStorage = textView?.textContentStorage {

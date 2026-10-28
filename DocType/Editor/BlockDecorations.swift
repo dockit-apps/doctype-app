@@ -9,6 +9,7 @@
 // so a line can have several (a task inside a quote).
 
 import AppKit
+import DocTypeCore
 
 final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
     func textLayoutManager(
@@ -39,6 +40,9 @@ final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
             string.enumerateAttribute(EditorTheme.tablePipeKey, in: whole) { value, pipeRange, _ in
                 guard let offset = value as? CGFloat else { return }
                 decorations.tablePipes += (pipeRange.location..<pipeRange.upperBound).map { ($0, offset) }
+            }
+            string.enumerateAttribute(EditorTheme.tableCellLinesKey, in: whole) { value, cellRange, _ in
+                if let cell = value as? TableCellLines { decorations.tableCells.append((cellRange.location, cell)) }
             }
         }
         string.enumerateAttribute(EditorTheme.imageKey, in: whole) { value, imageRange, _ in
@@ -77,6 +81,8 @@ nonisolated struct Decorations {
     /// Pipe positions within the paragraph, and how far into each (stretched)
     /// pipe its grid line goes.
     var tablePipes: [(location: Int, lineOffset: CGFloat)] = []
+    /// Cells drawn as lines (they have `<br>`s), by where their text starts.
+    var tableCells: [(location: Int, cell: TableCellLines)] = []
     var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty || !images.isEmpty || tableRow != nil }
 }
 
@@ -125,7 +131,7 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
     /// its spacing, and the extra empty line may follow it.
     private func tableRowBottom(_ row: TableRowAttribute) -> CGFloat {
         guard row.isLast, let line = textLines.last else { return layoutFragmentFrame.height }
-        return line.typographicBounds.maxY + EditorTheme.tableLineSpacing + EditorTheme.tableRowPadding
+        return line.typographicBounds.maxY + EditorTheme.tableLineSpacing + EditorTheme.tableRowPadding + row.extraHeight
     }
 
     override var renderingSurfaceBounds: CGRect {
@@ -169,6 +175,28 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         return buttons
     }
 
+    /// Draws the lines of cells with `<br>`s, whose text is hidden (see EditorTheme+Tables).
+    private func drawTableCellLines(at point: CGPoint, _ context: CGContext) {
+        guard !decorations.tableCells.isEmpty, let line = textLineFragments.first else { return }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        for (location, cell) in decorations.tableCells where NSLocationInRange(location, line.characterRange) {
+            let x = point.x + line.typographicBounds.minX + line.locationForCharacter(at: location).x
+            var y = point.y + line.typographicBounds.minY
+            for (text, width) in zip(cell.lines, cell.widths) {
+                let offset: CGFloat = switch cell.alignment {
+                case .left: 0
+                case .center: (cell.columnWidth - width) / 2
+                case .right: cell.columnWidth - width
+                }
+                text.draw(with: CGRect(x: x + offset, y: y, width: width + 1, height: EditorTheme.tableLineAdvance),
+                          options: [.usesLineFragmentOrigin])
+                y += EditorTheme.tableLineAdvance
+            }
+        }
+    }
+
     private func drawTableRow(_ row: TableRowAttribute, at point: CGPoint, _ context: CGContext) {
         let columns = tableColumnLines
         guard let left = columns.first, let right = columns.last else { return }
@@ -195,6 +223,8 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
             context.addLine(to: CGPoint(x: point.x + right, y: bottom - 0.5))
         }
         context.strokePath()
+
+        drawTableCellLines(at: point, context)
 
         for (_, frame) in tableButtons {
             let circle = frame.offsetBy(dx: point.x, dy: point.y)
