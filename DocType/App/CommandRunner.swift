@@ -65,6 +65,26 @@ final class CommandRunner {
             model.editor.format { Formatting.heading(0, in: $0, selection: $1) }
         case .taskItem:
             model.editor.format { Formatting.toggleTask(in: $0, selection: $1) }
+        case .insertTable:
+            model.editor.insertTable()
+        case .addRowAbove:
+            model.editor.performTableOperation(.addRowAbove)
+        case .addRowBelow:
+            model.editor.performTableOperation(.addRowBelow)
+        case .addColumnLeft:
+            model.editor.performTableOperation(.addColumnLeft)
+        case .addColumnRight:
+            model.editor.performTableOperation(.addColumnRight)
+        case .deleteRow:
+            model.editor.performTableOperation(.deleteRow)
+        case .deleteColumn:
+            model.editor.performTableOperation(.deleteColumn)
+        case .alignColumnLeft:
+            model.editor.performTableOperation(.align(.left))
+        case .alignColumnCenter:
+            model.editor.performTableOperation(.align(.center))
+        case .alignColumnRight:
+            model.editor.performTableOperation(.align(.right))
         }
     }
 
@@ -91,7 +111,10 @@ final class CommandRunner {
             model.selectedNotePath != nil
         case .searchNotes:
             model.hasUsableLibrary
-        case .bold, .italic, .inlineCode, .link, .heading1, .heading2, .heading3, .bodyText, .taskItem:
+        case .addRowAbove, .addRowBelow, .addColumnLeft, .addColumnRight, .deleteRow, .deleteColumn,
+             .alignColumnLeft, .alignColumnCenter, .alignColumnRight:
+            model.selectedNotePath != nil && model.editor.hasFocus && model.editor.isInTable
+        case .bold, .italic, .inlineCode, .link, .heading1, .heading2, .heading3, .bodyText, .taskItem, .insertTable:
             // Only while typing in the note, so they never touch the title field.
             model.selectedNotePath != nil && model.editor.hasFocus
         }

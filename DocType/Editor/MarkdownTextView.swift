@@ -3,6 +3,7 @@
 // drags of an image's resize handle.
 
 import AppKit
+import DocTypeCore
 
 final class MarkdownTextView: NSTextView {
     /// Called with true/false when the editor gains or loses keyboard focus.
@@ -18,6 +19,12 @@ final class MarkdownTextView: NSTextView {
     /// range and the new width), and once more with `isFinished` on release.
     var onImageResize: (_ range: NSRange, _ width: CGFloat, _ isFinished: Bool) -> Void = { _, _, _ in }
 
+    /// Called when a table's "+" button is clicked or a table item is chosen from
+    /// the context menu: the operation, and a location in the row/cell it's for.
+    var onTableOperation: (_ operation: TableOperation, _ location: Int) -> Void = { _, _ in }
+    /// True if `location` is inside a table (decides whether the context menu offers table items).
+    var isInTable: (_ location: Int) -> Bool = { _ in false }
+
     /// Called with files dropped or pasted into the editor and where they go.
     var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
 
@@ -28,6 +35,11 @@ final class MarkdownTextView: NSTextView {
         let point = convert(event.locationInWindow, from: nil)
         if event.modifierFlags.contains(.command), let destination = linkDestination(at: point) {
             onLinkClick(destination)
+            return
+        }
+        if let button = tableButtonHit(at: point) {
+            window?.makeFirstResponder(self)
+            onTableOperation(button.operation, button.location)
             return
         }
         if let hit = imageHit(at: point) {
@@ -84,6 +96,10 @@ final class MarkdownTextView: NSTextView {
     /// an arrow over images, and a resize cursor over a selected image's handle.
     @discardableResult
     private func updateCursor(at point: NSPoint, modifiers: NSEvent.ModifierFlags) -> Bool {
+        if tableButtonHit(at: point) != nil {
+            NSCursor.pointingHand.set()
+            return true
+        }
         if let hit = imageHit(at: point) {
             if hit.image.isSelected, Self.resizeZone(of: hit.frame).contains(point) {
                 NSCursor.frameResize(position: .bottomRight, directions: .all).set()
@@ -98,6 +114,65 @@ final class MarkdownTextView: NSTextView {
         return true
     }
 
+    // MARK: - Tables
+
+    /// The table "+" button under `point`: what it does and a location in the row it's on.
+    func tableButtonHit(at point: NSPoint) -> (operation: TableOperation, location: Int)? {
+        guard let (fragment, inFragment) = decoratedFragment(at: point) else { return nil }
+        guard let button = fragment.tableButtons.first(where: { $0.frame.insetBy(dx: -3, dy: -3).contains(inFragment) })
+        else { return nil }
+        guard let layout = textLayoutManager else { return nil }
+        let rowStart = layout.offset(from: layout.documentRange.location, to: fragment.rangeInElement.location)
+        var lineEnd = 0
+        (string as NSString).getLineStart(nil, end: nil, contentsEnd: &lineEnd, for: NSRange(location: rowStart, length: 0))
+        switch button.button {
+        case .addRow: return (.addRowBelow, rowStart)
+        case .addColumn: return (.addColumnRight, max(rowStart, lineEnd - 1))  // the last cell
+        }
+    }
+
+    /// The decorated layout fragment under `point` (view coordinates), and the point in its coordinates.
+    private func decoratedFragment(at point: NSPoint) -> (DecoratedLayoutFragment, CGPoint)? {
+        guard let layout = textLayoutManager else { return nil }
+        let origin = textContainerOrigin
+        let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
+        guard let fragment = layout.textLayoutFragment(for: inContainer) as? DecoratedLayoutFragment else { return nil }
+        let frame = fragment.layoutFragmentFrame
+        return (fragment, CGPoint(x: inContainer.x - frame.minX, y: inContainer.y - frame.minY))
+    }
+
+    /// Right-clicking in a table adds row and column items above the usual ones.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let location = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        guard isInTable(location) else { return super.menu(for: event) }
+        // A copy: NSTextView hands out one shared menu, which must not keep our items.
+        let menu = (super.menu(for: event)?.copy() as? NSMenu) ?? NSMenu()
+        if !NSLocationInRange(location, selectedRange()) { setSelectedRange(NSRange(location: location, length: 0)) }
+        let items: [(String, TableOperation)?] = [
+            ("Add Row Above", .addRowAbove), ("Add Row Below", .addRowBelow), nil,
+            ("Add Column Left", .addColumnLeft), ("Add Column Right", .addColumnRight), nil,
+            ("Delete Row", .deleteRow), ("Delete Column", .deleteColumn), nil,
+            ("Align Column Left", .align(.left)), ("Align Column Center", .align(.center)),
+            ("Align Column Right", .align(.right)), nil,
+        ]
+        for (index, entry) in items.enumerated() {
+            guard let (title, operation) = entry else {
+                menu.insertItem(.separator(), at: index)
+                continue
+            }
+            let item = NSMenuItem(title: title, action: #selector(runTableMenuItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = TableMenuAction(operation: operation, location: location)
+            menu.insertItem(item, at: index)
+        }
+        return menu
+    }
+
+    @objc private func runTableMenuItem(_ item: NSMenuItem) {
+        guard let action = item.representedObject as? TableMenuAction else { return }
+        onTableOperation(action.operation, action.location)
+    }
+
     // MARK: - Images
 
     /// Where dragging resizes an image: its corner handle, and its right edge.
@@ -109,10 +184,8 @@ final class MarkdownTextView: NSTextView {
     /// The image under `point` (view coordinates): its attribute, the range of its
     /// syntax in the document, and where it's drawn.
     func imageHit(at point: NSPoint) -> (image: ImageAttribute, range: NSRange, frame: CGRect)? {
-        guard let layout = textLayoutManager else { return nil }
+        guard let layout = textLayoutManager, let (fragment, _) = decoratedFragment(at: point) else { return nil }
         let origin = textContainerOrigin
-        let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
-        guard let fragment = layout.textLayoutFragment(for: inContainer) as? DecoratedLayoutFragment else { return nil }
         let fragmentOrigin = fragment.layoutFragmentFrame.origin
         for (mark, frame) in fragment.imageFrames {
             let inView = frame.offsetBy(dx: fragmentOrigin.x + origin.x, dy: fragmentOrigin.y + origin.y)
@@ -212,5 +285,15 @@ final class MarkdownTextView: NSTextView {
             assertionFailure("Editor switched to TextKit 1; something accessed NSTextView.layoutManager")
         }
         #endif
+    }
+}
+
+/// A table context menu item's operation and the location it was opened at.
+private final class TableMenuAction: NSObject {
+    let operation: TableOperation
+    let location: Int
+    init(operation: TableOperation, location: Int) {
+        self.operation = operation
+        self.location = location
     }
 }

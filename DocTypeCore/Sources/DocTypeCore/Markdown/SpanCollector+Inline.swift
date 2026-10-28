@@ -139,9 +139,10 @@ extension SpanCollector {
 
     // MARK: - Tables
 
-    /// Tables stay readable as text: pipes and the `|---|` row are dimmed, never
-    /// hidden, and the header row is bold. Every cell gets a `.tableCell` span so
-    /// the editor can line the columns up.
+    /// Tables look like tables: the editor draws a grid over the (invisible) pipes,
+    /// the header row is bold, and the `|---|` row is hidden except while the
+    /// cursor is on it. Every cell gets a `.tableCell` span so the editor can
+    /// line the columns up, and every row a `.tableRow` span for the grid.
     mutating func visitTable(_ table: Table) {
         defer { descendInto(table) }
         guard let range = localRange(table) else { return }
@@ -156,13 +157,14 @@ extension SpanCollector {
             default: .left
             }
         }
+        guard let firstLine = lines.first, let lastLine = lines.last else { return }
+        let tableRange = NSRange(location: firstLine.location, length: lastLine.upperBound - firstLine.location)
         for (index, line) in lines.enumerated() {
-            let (cells, pipes) = Self.tableCells(in: line, of: source)
-            if index == 1 {
-                dimmed(line)  // the |---|---| delimiter row
-            } else {
-                for pipe in pipes { dimmed(NSRange(location: pipe, length: 1)) }
-            }
+            let (cells, pipes) = TableRowParsing.cells(in: line, of: source)
+            containerSpans.append(StyleSpan(shifted(line), .tableRow(index: index, isLast: index == lines.count - 1),
+                                            revealRange: shifted(tableRange)))
+            if index == 1 { marker(line) }  // the |---|---| delimiter row
+            for pipe in pipes { markerSpans.append(StyleSpan(shifted(NSRange(location: pipe, length: 1)), .tablePipe)) }
             for (column, cell) in cells.enumerated() {
                 let alignment = column < alignments.count ? alignments[column] : .left
                 // Empty cells ("||") too: they need widening like any other.
@@ -171,30 +173,5 @@ extension SpanCollector {
                 if index == 0 { inline(cell, .strong) }
             }
         }
-    }
-
-    /// Splits a table row at its pipes (not `\|`): the text of each cell, and
-    /// where the pipes are. Text before the first pipe or after the last one is
-    /// a cell only if it isn't blank (`a | b` has two cells, `| a | b |` too).
-    static func tableCells(in line: NSRange, of source: NSString) -> (cells: [NSRange], pipes: [Int]) {
-        var pipes: [Int] = []
-        var backslashes = 0
-        for location in line.location..<line.upperBound {
-            let character = source.character(at: location)
-            if character == 124, backslashes % 2 == 0 { pipes.append(location) }  // "|"
-            backslashes = character == 92 ? backslashes + 1 : 0  // "\"
-        }
-        let bounds = [line.location - 1] + pipes + [line.upperBound]
-        func isBlank(_ range: NSRange) -> Bool {
-            source.substring(with: range).allSatisfy { $0 == " " || $0 == "\t" }
-        }
-        var cells: [NSRange] = []
-        for index in 0..<(bounds.count - 1) {
-            let cell = NSRange(location: bounds[index] + 1, length: bounds[index + 1] - bounds[index] - 1)
-            let isEdge = index == 0 || index == bounds.count - 2
-            if isEdge, isBlank(cell) { continue }
-            cells.append(cell)
-        }
-        return (cells, pipes)
     }
 }

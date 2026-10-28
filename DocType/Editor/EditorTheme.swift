@@ -18,6 +18,10 @@ enum EditorTheme {
     static let bulletKey = NSAttributedString.Key("DocTypeBullet")
     /// Marks a task's "[ ]" (drawn as a checkbox); the value is true when checked.
     static let taskKey = NSAttributedString.Key("DocTypeTask")
+    /// Marks a table row's line, for drawing the grid (value: TableRowAttribute).
+    static let tableRowKey = NSAttributedString.Key("DocTypeTableRow")
+    /// Marks a table's pipe characters, where the grid's vertical lines go.
+    static let tablePipeKey = NSAttributedString.Key("DocTypeTablePipe")
     /// Marks a link's text; the value is its destination (⌘-click opens it).
     static let linkKey = NSAttributedString.Key("DocTypeLink")
     /// Space between the quote bar and the quoted text.
@@ -55,6 +59,8 @@ enum EditorTheme {
         var unmeasuredImages: [URL] = []
         for span in spans where !span.isHeldBack(by: selection) {
             switch span.style {
+            case .tableRow(let index, let isLast):
+                applyTableRow(span, index: index, isLast: isLast, to: text, selection: selection)
             case .image(let source, let width):
                 if let url = applyImage(span, source: source, width: width, to: text, selection: selection, context: images) {
                     unmeasuredImages.append(url)
@@ -110,7 +116,10 @@ enum EditorTheme {
         case .taskBox(let checked):
             // Keeps its width; BlockDecorations draws a checkbox there.
             [.foregroundColor: NSColor.clear, taskKey: checked]
-        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell, .image:
+        case .tablePipe:
+            // Keeps its width (columns line up on it); BlockDecorations draws the grid line.
+            [.foregroundColor: NSColor.clear, tablePipeKey: true]
+        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell, .tableRow, .image:
             [:]  // handled in apply(_:to:resetting:selection:)
         }
     }
@@ -129,6 +138,33 @@ enum EditorTheme {
     }
 
     // MARK: - Tables
+
+    /// Room above and below each row's text, inside the grid.
+    nonisolated static let tableRowPadding: CGFloat = 5
+    /// Extra room under a table's last row for its "add row" button.
+    nonisolated static let tableButtonSpace: CGFloat = 20
+
+    /// Marks a table row's line and pads it. The `|---|` row collapses to almost
+    /// nothing while it's hidden (its line break is hidden too).
+    private static func applyTableRow(_ span: StyleSpan, index: Int, isLast: Bool, to text: NSMutableAttributedString,
+                                      selection: NSRange) {
+        let paragraph = text.mutableString.paragraphRange(for: NSRange(location: span.range.location, length: 0))
+        let isActive = span.isRevealed(by: selection)
+        let style = NSMutableParagraphStyle()
+        let isHiddenDelimiter = index == 1
+            && !(selection.location <= span.range.upperBound && selection.upperBound >= span.range.location)
+        if isHiddenDelimiter {
+            text.addAttributes(concealedAttributes, range: paragraph)
+            style.maximumLineHeight = 1
+        } else {
+            style.lineSpacing = 3
+            style.paragraphSpacingBefore = tableRowPadding
+            style.paragraphSpacing = tableRowPadding + (isLast ? tableButtonSpace : 0)
+        }
+        text.addAttributes([.paragraphStyle: style,
+                            tableRowKey: TableRowAttribute(index: index, isLast: isLast, isActive: isActive)],
+                           range: paragraph)
+    }
 
     /// Lines up table columns without changing the text: each cell is measured as
     /// styled, and the narrower ones get extra space (kerning) on one character so
@@ -262,4 +298,12 @@ enum EditorTheme {
                            blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
         }
     }
+}
+
+/// What's stored on a table row's line, for BlockDecorations.
+nonisolated struct TableRowAttribute: Hashable, Sendable {
+    let index: Int
+    let isLast: Bool
+    /// The cursor is in the table: its "add row" and "add column" buttons show.
+    let isActive: Bool
 }

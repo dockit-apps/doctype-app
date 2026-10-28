@@ -16,7 +16,8 @@ public struct TextEdit: Equatable, Sendable {
         self.selectionAfter = selectionAfter
     }
 
-    /// True for an edit that only keeps the selection (a key that should do nothing).
+    /// True for an edit that changes no text, only (maybe) the selection: a key
+    /// that should do nothing, or one that moves the cursor.
     public var isNoChange: Bool { range.length == 0 && replacement.isEmpty }
 
     /// Applies the edit to a copy of `text` (for tests and headless use).

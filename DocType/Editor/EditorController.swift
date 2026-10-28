@@ -21,6 +21,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var tags: [String] = []
     /// The text view has keyboard focus.
     private(set) var hasFocus = false
+    /// The cursor is in a table (enables the table commands).
+    var isInTable = false
 
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
@@ -53,6 +55,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.onTaskBoxClick = { [weak self] in self?.toggleTask(at: $0) }
         textView.onLinkClick = { [weak self] in self?.onOpenLink($0) }
         setUpImages()
+        setUpTables()
     }
 
     func focusText() {
@@ -283,6 +286,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// The cursor moved: show the markdown syntax on its line, hide it elsewhere.
     func textViewDidChangeSelection(_ notification: Notification) {
         if let storage = textView.textStorage { styler.selectionDidChange(in: storage) }
+        updateIsInTable()
     }
 
     func scheduleAutosave() {

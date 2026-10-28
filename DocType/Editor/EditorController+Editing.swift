@@ -9,7 +9,10 @@ extension EditorController {
     /// Applies an edit computed by core through NSTextView's undo-aware path, so
     /// one ⌘Z reverts it and styling and autosave follow as for typing.
     func apply(_ edit: TextEdit) {
-        guard !edit.isNoChange else { return }
+        guard !edit.isNoChange else {
+            textView.setSelectedRange(edit.selectionAfter)  // no undo step for moving the cursor
+            return
+        }
         guard let storage = textView.textStorage,
               textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
         storage.replaceCharacters(in: edit.range, with: edit.replacement)
@@ -23,15 +26,18 @@ extension EditorController {
         let edit: TextEdit? = switch selector {
         case #selector(NSResponder.insertNewline(_:)):
             CodeFenceEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
+                ?? TableEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? ListContinuation.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForNewline(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.deleteBackward(_:)):
             ListContinuation.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
                 ?? QuoteEditing.editForBackspace(in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertTab(_:)):
-            ListIndentation.edit(.indent, in: text, selection: selection, blockMap: styler.blockMap)
+            TableEditing.editForTab(forward: true, in: text, selection: selection, blockMap: styler.blockMap)
+                ?? ListIndentation.edit(.indent, in: text, selection: selection, blockMap: styler.blockMap)
         case #selector(NSResponder.insertBacktab(_:)):
-            ListIndentation.edit(.outdent, in: text, selection: selection, blockMap: styler.blockMap)
+            TableEditing.editForTab(forward: false, in: text, selection: selection, blockMap: styler.blockMap)
+                ?? ListIndentation.edit(.outdent, in: text, selection: selection, blockMap: styler.blockMap)
         default:
             nil
         }

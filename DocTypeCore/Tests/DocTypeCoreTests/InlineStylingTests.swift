@@ -117,12 +117,20 @@ struct InlineStylingTests {
 
     // MARK: Tables
 
-    @Test func tablePipesAreDimmedButAlwaysVisible() {
+    @Test func tableRowsPipesAndTheDelimiterRow() {
         let text = "| a | b |\n|---|---|\n| 1 | 2 |" as NSString
         let spans = MarkdownStyler.spans(in: text, blocks: BlockMap(text: text).blocks)
-        let markers = spans.filter { $0.style == .syntaxMarker }
-        #expect(markers.count == 7)  // 3 + delimiter row + 3
-        #expect(markers.allSatisfy { $0.revealRange == nil })
+        #expect(spans.filter { $0.style == .tablePipe }.count == 9)
+        let rows = spans.compactMap { span -> String? in
+            guard case .tableRow(let index, let isLast) = span.style else { return nil }
+            #expect(span.revealRange == NSRange(location: 0, length: text.length))  // the whole table
+            return "\(index)\(isLast ? "!" : ""):\(text.substring(with: span.range))"
+        }
+        #expect(rows == ["0:| a | b |", "1:|---|---|", "2!:| 1 | 2 |"])
+        // The delimiter row is syntax, shown only while the cursor is on it.
+        let delimiter = spans.first { $0.style == .syntaxMarker }
+        #expect(delimiter.map { text.substring(with: $0.range) } == "|---|---|")
+        #expect(delimiter?.revealRange == NSRange(location: 10, length: 9))
     }
 
     private func cells(_ text: String) -> [String] {

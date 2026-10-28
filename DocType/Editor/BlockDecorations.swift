@@ -1,7 +1,7 @@
 // Draws decorations behind and over the text, the way chat apps and Obsidian do:
 // code blocks as one rounded box, block quotes with a bar on the left, `---` as a
-// horizontal rule, list bullets as "•", tasks as checkboxes, and images under
-// the line that holds their syntax.
+// horizontal rule, list bullets as "•", tasks as checkboxes, images under the
+// line that holds their syntax, and tables as a grid with "+" buttons.
 //
 // TextKit 2 lays out each paragraph in its own layout fragment. EditorTheme marks
 // lines and characters with attributes; this delegate reads them and returns a
@@ -27,12 +27,18 @@ final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
         }
         decorations.quote = lineAttributes[EditorTheme.quoteLineKey] != nil
         decorations.rule = lineAttributes[EditorTheme.ruleLineKey] != nil
+        decorations.tableRow = lineAttributes[EditorTheme.tableRowKey] as? TableRowAttribute
         let whole = NSRange(location: 0, length: string.length)
         string.enumerateAttribute(EditorTheme.bulletKey, in: whole) { value, markRange, _ in
             if value != nil { decorations.marks.append(ListMark(range: markRange, kind: .bullet)) }
         }
         string.enumerateAttribute(EditorTheme.taskKey, in: whole) { value, markRange, _ in
             if let checked = value as? Bool { decorations.marks.append(ListMark(range: markRange, kind: .task(checked: checked))) }
+        }
+        if decorations.tableRow != nil {
+            string.enumerateAttribute(EditorTheme.tablePipeKey, in: whole) { value, pipeRange, _ in
+                if value != nil { decorations.tablePipes += pipeRange.location..<pipeRange.upperBound }
+            }
         }
         string.enumerateAttribute(EditorTheme.imageKey, in: whole) { value, imageRange, _ in
             if let image = value as? ImageAttribute { decorations.images.append(ImageMark(image: image, range: imageRange)) }
@@ -66,7 +72,10 @@ nonisolated struct Decorations {
     var rule = false
     var marks: [ListMark] = []
     var images: [ImageMark] = []
-    var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty || !images.isEmpty }
+    var tableRow: TableRowAttribute?
+    /// Pipe positions within the paragraph (where the grid's vertical lines go).
+    var tablePipes: [Int] = []
+    var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty || !images.isEmpty || tableRow != nil }
 }
 
 /// `nonisolated`: TextKit 2 may lay out and draw fragments off the main thread.
@@ -100,7 +109,91 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
     }
 
     override var renderingSurfaceBounds: CGRect {
-        imageFrames.reduce(super.renderingSurfaceBounds.union(fullWidth)) { $0.union($1.frame.insetBy(dx: -4, dy: -4)) }
+        let bounds = imageFrames.reduce(super.renderingSurfaceBounds.union(fullWidth)) { $0.union($1.frame.insetBy(dx: -4, dy: -4)) }
+        return tableButtons.reduce(bounds) { $0.union($1.frame.insetBy(dx: -2, dy: -2)) }
+    }
+
+    // MARK: - Tables
+
+    enum TableButton { case addRow, addColumn }
+
+    private static let tableLine = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.16)
+    private static let tableHeaderFill = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.04)
+    /// Half the width of "|", to put grid lines through the middle of the pipes.
+    private static let halfPipeWidth: CGFloat = ("|" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 15)]).width / 2
+
+    /// Where the grid's vertical lines go, in fragment coordinates: through each
+    /// pipe. TextKit reports a character halfway into the extra space (kerning)
+    /// of the one before it, and the glyph is drawn after all of it.
+    private var tableColumnLines: [CGFloat] {
+        guard let line = textLineFragments.first, let paragraph = textElement as? NSTextParagraph else { return [] }
+        let string = paragraph.attributedString
+        return decorations.tablePipes.compactMap { pipe in
+            guard NSLocationInRange(pipe, line.characterRange) else { return nil }
+            let kernBefore = pipe > 0 ? (string.attribute(.kern, at: pipe - 1, effectiveRange: nil) as? CGFloat ?? 0) : 0
+            return line.typographicBounds.minX + line.locationForCharacter(at: pipe).x + kernBefore / 2 + Self.halfPipeWidth
+        }
+    }
+
+    /// The table's "+" buttons on this row (fragment coordinates): "add column"
+    /// right of the header, "add row" under the last row. Only while the cursor is in the table.
+    var tableButtons: [(button: TableButton, frame: CGRect)] {
+        guard let row = decorations.tableRow, row.isActive, row.index == 0 || row.isLast,
+              let left = tableColumnLines.first, let right = tableColumnLines.last else { return [] }
+        let size: CGFloat = 16
+        var buttons: [(TableButton, CGRect)] = []
+        if row.index == 0 {
+            let height = layoutFragmentFrame.height - (row.isLast ? EditorTheme.tableButtonSpace : 0)
+            buttons.append((.addColumn, CGRect(x: right + 6, y: (height - size) / 2, width: size, height: size)))
+        }
+        if row.isLast {
+            let bottom = layoutFragmentFrame.height - EditorTheme.tableButtonSpace
+            buttons.append((.addRow, CGRect(x: (left + right - size) / 2, y: bottom + 3, width: size, height: size)))
+        }
+        return buttons
+    }
+
+    private func drawTableRow(_ row: TableRowAttribute, at point: CGPoint, _ context: CGContext) {
+        let columns = tableColumnLines
+        guard let left = columns.first, let right = columns.last else { return }
+        let top = point.y
+        let bottom = point.y + layoutFragmentFrame.height - (row.isLast ? EditorTheme.tableButtonSpace : 0)
+        context.saveGState()
+        if row.index == 0 {
+            context.setFillColor(Self.tableHeaderFill.cgColor)
+            context.fill(CGRect(x: point.x + left, y: top, width: right - left, height: bottom - top))
+        }
+        context.setStrokeColor(Self.tableLine.cgColor)
+        context.setLineWidth(1)
+        for x in columns {
+            context.move(to: CGPoint(x: point.x + x, y: top))
+            context.addLine(to: CGPoint(x: point.x + x, y: bottom))
+        }
+        if row.index == 0 {
+            context.move(to: CGPoint(x: point.x + left, y: top + 0.5))
+            context.addLine(to: CGPoint(x: point.x + right, y: top + 0.5))
+        }
+        // The |---| row only continues the columns: the header's bottom line is its border.
+        if row.index != 1 {
+            context.move(to: CGPoint(x: point.x + left, y: bottom - 0.5))
+            context.addLine(to: CGPoint(x: point.x + right, y: bottom - 0.5))
+        }
+        context.strokePath()
+
+        for (_, frame) in tableButtons {
+            let circle = frame.offsetBy(dx: point.x, dy: point.y)
+            context.setFillColor(NSColor.controlAccentColor.cgColor)
+            context.fillEllipse(in: circle)
+            context.setStrokeColor(NSColor.white.cgColor)
+            context.setLineWidth(1.6)
+            context.setLineCap(.round)
+            context.move(to: CGPoint(x: circle.midX - 4, y: circle.midY))
+            context.addLine(to: CGPoint(x: circle.midX + 4, y: circle.midY))
+            context.move(to: CGPoint(x: circle.midX, y: circle.midY - 4))
+            context.addLine(to: CGPoint(x: circle.midX, y: circle.midY + 4))
+            context.strokePath()
+        }
+        context.restoreGState()
     }
 
     // MARK: - Images
@@ -171,6 +264,7 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
             context.fill(CGRect(x: area.minX, y: area.minY + (area.height / 2).rounded(), width: area.width, height: 1))
         }
         context.restoreGState()
+        if let row = decorations.tableRow { drawTableRow(row, at: point, context) }
         super.draw(at: point, in: context)
         for mark in decorations.marks { draw(mark, at: point, context) }
         drawImages(at: point, context)

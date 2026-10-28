@@ -30,6 +30,16 @@ public enum CommandID: String, CaseIterable, Sendable {
     case heading3 = "format.heading3"
     case bodyText = "format.bodyText"
     case taskItem = "format.taskItem"
+    case insertTable = "table.insert"
+    case addRowAbove = "table.addRowAbove"
+    case addRowBelow = "table.addRowBelow"
+    case addColumnLeft = "table.addColumnLeft"
+    case addColumnRight = "table.addColumnRight"
+    case deleteRow = "table.deleteRow"
+    case deleteColumn = "table.deleteColumn"
+    case alignColumnLeft = "table.alignLeft"
+    case alignColumnCenter = "table.alignCenter"
+    case alignColumnRight = "table.alignRight"
 }
 
 /// The top-level menu a command appears in.
@@ -39,6 +49,7 @@ public enum MenuName: String, CaseIterable, Sendable {
     case format = "Format"
     case view = "View"
     case note = "Note"
+    case table = "Table"
 }
 
 extension CommandID {
@@ -102,6 +113,26 @@ extension CommandID {
             Info(title: "Body Text", menu: .format, defaultShortcuts: [.command("0", .option)])
         case .taskItem:
             Info(title: "Task Item", menu: .format, defaultShortcuts: [.command("l", .shift)])
+        case .insertTable:
+            Info(title: "Insert Table", menu: .table, defaultShortcuts: [.command("t", .option)])
+        case .addRowAbove:
+            Info(title: "Add Row Above", menu: .table, defaultShortcuts: [Shortcut(.returnKey, [.command, .shift])])
+        case .addRowBelow:
+            Info(title: "Add Row Below", menu: .table, defaultShortcuts: [Shortcut(.returnKey, .command)])
+        case .addColumnLeft:
+            Info(title: "Add Column Left", menu: .table, defaultShortcuts: [])
+        case .addColumnRight:
+            Info(title: "Add Column Right", menu: .table, defaultShortcuts: [])
+        case .deleteRow:
+            Info(title: "Delete Row", menu: .table, defaultShortcuts: [])
+        case .deleteColumn:
+            Info(title: "Delete Column", menu: .table, defaultShortcuts: [])
+        case .alignColumnLeft:
+            Info(title: "Align Column Left", menu: .table, defaultShortcuts: [])
+        case .alignColumnCenter:
+            Info(title: "Align Column Center", menu: .table, defaultShortcuts: [])
+        case .alignColumnRight:
+            Info(title: "Align Column Right", menu: .table, defaultShortcuts: [])
         }
     }
 

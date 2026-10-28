@@ -83,8 +83,10 @@ struct EditorRichContentTests {
         let textView = editor.textView
 
         #expect(textView.string == text)
-        let rows = pipeColumns(text, in: textView, window)
+        // The |---| row is hidden (the cursor isn't on it), so only the visible rows count.
+        var rows = pipeColumns(text, in: textView, window)
         #expect(rows.count == 4)
+        rows.remove(at: 1)
         for row in rows.dropFirst() {
             for (x, expected) in zip(row, rows[0]) { #expect(abs(x - expected) < 1, "\(rows)") }
         }
@@ -94,7 +96,8 @@ struct EditorRichContentTests {
         textView.insertText("bby Longername", replacementRange: textView.selectedRange())
         editor.styler.applyPendingStyles(in: textView.textStorage!)
         layOut(textView)
-        let typed = pipeColumns(textView.string, in: textView, window)
+        var typed = pipeColumns(textView.string, in: textView, window)
+        typed.remove(at: 1)
         for row in typed.dropFirst() {
             for (x, expected) in zip(row, typed[0]) { #expect(abs(x - expected) < 1, "\(typed)") }
         }
@@ -305,5 +308,83 @@ struct EditorRichContentTests {
         textView.mouseUp(with: mouse(.leftMouseUp, at: NSPoint(x: handle.x - 100, y: handle.y), in: textView))
         #expect(textView.string == "![Pic|300](pic.png)\n\nend")
         #expect(image(at: 0, in: textView)?.size == CGSize(width: 300, height: 150))
+    }
+
+    // MARK: Table editing
+
+    @Test func tableButtonsAddRowsAndColumnsInOneUndoStepEach() async throws {
+        let text = "| A | B |\n|---|---|\n| 1 | 2 |\n\nend"
+        let (editor, folder, _) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+
+        // Outside the table there are no buttons.
+        let origin = textView.textContainerOrigin
+        func buttons() -> [(TableOperation, Int)] {
+            layOut(textView)
+            var found: [(TableOperation, Int)] = []
+            for y in stride(from: origin.y, to: origin.y + 160, by: 2) {
+                for x in stride(from: origin.x, to: origin.x + 200, by: 2) {
+                    if let hit = textView.tableButtonHit(at: NSPoint(x: x, y: y)),
+                       !found.contains(where: { $0.0 == hit.operation }) { found.append(hit) }
+                }
+            }
+            return found
+        }
+        #expect(buttons().isEmpty)
+
+        textView.setSelectedRange(NSRange(location: 2, length: 0))  // in "A"
+        #expect(editor.isInTable)
+        #expect(buttons().map(\.0) == [.addColumnRight, .addRowBelow])
+
+        let addColumn = try #require(buttons().first { $0.0 == .addColumnRight })
+        editor.performTableOperation(addColumn.0, at: addColumn.1)
+        #expect(textView.string == "| A | B |  |\n|---|---| --- |\n| 1 | 2 |  |\n\nend")
+        textView.undoManager?.undo()
+        #expect(textView.string == text)
+
+        let addRow = try #require(buttons().first { $0.0 == .addRowBelow })
+        editor.performTableOperation(addRow.0, at: addRow.1)
+        #expect(textView.string == "| A | B |\n|---|---|\n| 1 | 2 |\n|  |  |\n\nend")
+    }
+
+    @Test func tabAndReturnMoveBetweenCells() async throws {
+        let text = "| A | B |\n|---|---|\n| 1 | 2 |"
+        let (editor, folder, _) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        textView.doCommand(by: #selector(NSResponder.insertTab(_:)))
+        #expect(textView.selectedRange() == NSRange(location: 6, length: 1))  // "B" selected
+        #expect(textView.undoManager?.canUndo != true)  // moving isn't an edit
+        textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        #expect(textView.selectedRange() == NSRange(location: 27, length: 0))  // after "2"
+        #expect(textView.string == text)
+        textView.doCommand(by: #selector(NSResponder.insertTab(_:)))  // last cell: adds a row
+        #expect(textView.string == text + "\n|  |  |")
+    }
+
+    @Test func contextMenuOffersTableItemsOnlyInTables() async throws {
+        let text = "| A | B |\n|---|---|\n| 1 | 2 |\n\nplain text"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        let string = text as NSString
+
+        let inTable = center(of: string.range(of: "1"), in: textView, window)
+        let menu = try #require(textView.menu(for: mouse(.rightMouseDown, at: inTable, in: textView)))
+        #expect(menu.items.first?.title == "Add Row Above")
+        let delete = try #require(menu.items.first { $0.title == "Delete Column" })
+        _ = delete.target?.perform(delete.action, with: delete)
+        #expect(textView.string == "| B |\n|---|\n| 2 |\n\nplain text")
+
+        layOut(textView)
+        let plain = (textView.string as NSString).range(of: "plain")
+        #expect(!editor.isInTable(at: plain.location))
+        let outside = center(of: plain, in: textView, window)
+        #expect(textView.characterIndexForInsertion(at: outside) >= plain.location)
+        let plainMenu = textView.menu(for: mouse(.rightMouseDown, at: outside, in: textView))
+        #expect(plainMenu?.items.contains { $0.title == "Add Row Above" } != true)
     }
 }

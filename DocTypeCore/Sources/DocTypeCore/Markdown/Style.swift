@@ -49,6 +49,11 @@ public enum Style: Hashable, Sendable {
     /// widens cells so each column lines up. Row 0 (the header) column 0 starts a
     /// new table. Positions aren't stored, so styles don't change when text above moves.
     case tableCell(row: Int, column: Int, alignment: TableAlignment)
+    /// A whole table row (its line). The editor draws the table's grid from
+    /// these; `revealRange` is the whole table, so it knows when the cursor is in it.
+    case tableRow(index: Int, isLast: Bool)
+    /// A table's "|": invisible, because the grid is drawn there, but it keeps its width.
+    case tablePipe
 }
 
 /// How a table column's cells sit in it, from the `:---:` delimiter row.

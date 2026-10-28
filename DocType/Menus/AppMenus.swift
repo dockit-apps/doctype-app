@@ -19,6 +19,23 @@ struct AppMenus: Commands {
         if !model.commands.commands(in: .note).isEmpty {
             CommandMenu(MenuName.note.rawValue) { items(for: .note) }
         }
+        CommandMenu(MenuName.table.rawValue) { tableItems }
+    }
+
+    /// The Table menu, grouped: insert, rows, columns, delete, alignment.
+    @ViewBuilder private var tableItems: some View {
+        let groups: [[CommandID]] = [[.insertTable], [.addRowAbove, .addRowBelow, .addColumnLeft, .addColumnRight],
+                                     [.deleteRow, .deleteColumn], [.alignColumnLeft, .alignColumnCenter, .alignColumnRight]]
+        ForEach(groups.indices, id: \.self) { index in
+            if index > 0 { Divider() }
+            ForEach(groups[index], id: \.self) { command in item(command) }
+        }
+    }
+
+    private func item(_ command: CommandID) -> some View {
+        Button(command.title) { model.commands.run(command) }
+            .keyboardShortcut(command.info.defaultShortcuts.first?.keyboardShortcut)
+            .disabled(!model.commands.isEnabled(command))
     }
 
     private func items(for menu: MenuName) -> some View {
