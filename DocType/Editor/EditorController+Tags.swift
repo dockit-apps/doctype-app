@@ -15,7 +15,7 @@ extension EditorController {
     }
 
     private func setTags(_ newTags: [String], actionName: String) {
-        guard path != nil, newTags != tags else { return }
+        guard path != nil, !isReadOnly, newTags != tags else { return }
         replaceFrontmatter(with: Frontmatter.settingTags(newTags, in: frontmatter?.raw), actionName: actionName)
     }
 

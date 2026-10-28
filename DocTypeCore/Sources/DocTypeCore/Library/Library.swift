@@ -55,10 +55,16 @@ public actor Library {
 
     // MARK: - Single notes
 
+    /// The full text of a note, frontmatter included, and whether it's UTF-8
+    /// (see NoteText). Throws if the file can't be read.
+    public func readNote(_ path: String) throws -> NoteText {
+        assertNotOnMainThread()
+        return NoteText.decode(try Data(contentsOf: url(for: path)))
+    }
+
     /// The full text of a note, frontmatter included.
     public func read(_ path: String) throws -> String {
-        assertNotOnMainThread()
-        return try String(contentsOf: url(for: path), encoding: .utf8)
+        try readNote(path).text
     }
 
     /// Writes a note atomically (temp file + rename, so a crash never leaves

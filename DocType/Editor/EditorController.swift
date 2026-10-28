@@ -25,6 +25,9 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var isInTable = false
     /// A table cell is being edited (TableCellSession); line formats are off there.
     var isEditingTableCell = false
+    /// The open note isn't UTF-8 text: it's shown but never changed or saved
+    /// (saving would rewrite it as UTF-8, see NoteText).
+    private(set) var isReadOnly = false
 
     @ObservationIgnored let scrollView: NSScrollView
     @ObservationIgnored let textView: MarkdownTextView
@@ -108,7 +111,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         do {
             let state = DocTypeCore.signposter.beginInterval("Open note")
             defer { DocTypeCore.signposter.endInterval("Open note", state) }
-            let note = await prepare(try await library.read(path), path: path)
+            let note = await prepare(try await library.readNote(path), path: path)
             guard !Task.isCancelled else { return false }
             self.path = path
             show(note, keepingPosition: false)
@@ -128,6 +131,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         tags = []
         lastSyncedText = ""
         isDirty = false
+        setReadOnly(false)
         styler.imageContext = nil
         if let storage = textView.textStorage {
             styler.replaceDocument(in: storage, text: "", blockMap: BlockMap(), spans: [],
@@ -169,7 +173,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// pending or the file is being moved.
     func save() async {
         autosaveTask?.cancel()
-        guard isDirty, pendingDiskText == nil, !isMoving, let path, let library else { return }
+        guard isDirty, !isReadOnly, pendingDiskText == nil, !isMoving, let path, let library else { return }
         let text = currentText
         isDirty = false
         lastSyncedText = text
@@ -186,11 +190,12 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// Called when the open note may have changed on disk.
     func noteChangedOnDisk() async {
         guard let path, let library else { return }
-        guard let diskText = try? await library.read(path) else {
+        guard let disk = try? await library.readNote(path) else {
             await noteRemovedFromDisk()
             return
         }
         guard path == self.path else { return }  // switched notes while reading
+        let diskText = disk.text
         switch ExternalChangePolicy.action(
             diskText: diskText, lastSyncedText: lastSyncedText,
             hasUnsavedEdits: isDirty, conflictPending: pendingDiskText != nil
@@ -198,7 +203,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         case .ignore:
             break
         case .reload:
-            let note = await prepare(diskText, path: path)
+            let note = await prepare(disk, path: path)
             guard path == self.path else { return }
             if isDirty {
                 // You started typing while the new version was being prepared.
@@ -234,7 +239,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         guard let diskText = pendingDiskText, let path, let library else { return }
         // Read-only while resolving, so nothing typed during the saves can be lost.
         textView.isEditable = false
-        defer { textView.isEditable = true }
+        defer { textView.isEditable = !isReadOnly }
         let resolution = ExternalChangePolicy.resolve(choice, editorText: currentText, diskText: diskText)
         do {
             try await library.saveConflictCopy(of: path, text: resolution.copyText)
@@ -249,7 +254,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
             isDirty = true
             await save()
         case .useDiskVersion:
-            show(await prepare(resolution.finalText, path: path), keepingPosition: true)
+            show(await prepare(NoteText(text: resolution.finalText, isUTF8: true), path: path), keepingPosition: true)
         }
     }
 
@@ -263,18 +268,20 @@ final class EditorController: NSObject, NSTextViewDelegate {
         let blockMap: BlockMap
         let spans: [StyleSpan]
         let images: ImageContext?
+        let isReadOnly: Bool
     }
 
     /// Splits off the frontmatter, styles the body and measures its images, all
     /// off the main thread.
-    private func prepare(_ text: String, path: String) async -> PreparedNote {
+    private func prepare(_ note: NoteText, path: String) async -> PreparedNote {
+        let text = note.text
         let (frontmatter, body) = Frontmatter.split(text)
         let bodyText = String(body)
         let styled = await MarkdownStyler.styleDocument(bodyText)
         let images = imageContext(forNote: path)
         await measureImages(in: styled.spans, context: images)
         return PreparedNote(text: text, frontmatter: frontmatter, body: bodyText,
-                            blockMap: styled.blockMap, spans: styled.spans, images: images)
+                            blockMap: styled.blockMap, spans: styled.spans, images: images, isReadOnly: !note.isUTF8)
     }
 
     /// Puts a prepared note into the editor without registering undo.
@@ -292,6 +299,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         lastSyncedText = note.text
         isDirty = false
         autosaveTask?.cancel()
+        setReadOnly(note.isReadOnly)
         styler.imageContext = note.images
         if let storage = textView.textStorage {
             styler.replaceDocument(in: storage, text: note.body, blockMap: note.blockMap, spans: note.spans,
@@ -306,6 +314,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
         } else {
             textView.scrollToBeginningOfDocument(nil)
         }
+    }
+
+    private func setReadOnly(_ readOnly: Bool) {
+        if readOnly != isReadOnly { isReadOnly = readOnly }
+        textView.isEditable = !readOnly
     }
 
     // MARK: - NSTextViewDelegate

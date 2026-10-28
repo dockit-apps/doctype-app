@@ -32,6 +32,33 @@ struct EditorTypingTests {
         textView.textStorage?.attribute(.font, at: location, effectiveRange: nil) as? NSFont
     }
 
+    @Test func aNoteThatIsntUTF8OpensReadOnlyAndIsNeverSaved() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "DocTypeAppTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let bytes = "Caf\u{e9} notes".data(using: .windowsCP1252)!
+        try bytes.write(to: folder.appending(path: "Old.md"))
+        try "Fresh".write(to: folder.appending(path: "New.md"), atomically: true, encoding: .utf8)
+        let editor = EditorController()
+        editor.library = Library(root: folder)
+
+        #expect(await editor.open("Old.md"))
+        #expect(editor.textView.string == "Café notes")
+        #expect(editor.isReadOnly)
+        #expect(!editor.textView.isEditable)
+        editor.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        type("x", in: editor.textView)
+        editor.addTag("exam")
+        #expect(editor.textView.string == "Café notes")
+        #expect(editor.tags.isEmpty)
+        await editor.save()
+        #expect(try Data(contentsOf: folder.appending(path: "Old.md")) == bytes)
+
+        #expect(await editor.open("New.md"))
+        #expect(!editor.isReadOnly)
+        #expect(editor.textView.isEditable)
+    }
+
     @Test func typingInTheMiddleKeepsTheCursorAfterEachCharacter() async throws {
         let (editor, folder) = try await editor(showing: "# Heading\n\nFirst line.\nSecond line.\n\nAnother paragraph.\n")
         defer { try? FileManager.default.removeItem(at: folder) }

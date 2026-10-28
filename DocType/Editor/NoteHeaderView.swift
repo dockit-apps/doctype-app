@@ -30,8 +30,15 @@ struct NoteHeaderView: View {
                     if !focused { commit() }
                 }
 
-            TagRow(tags: model.editor.tags, onAdd: { model.showAddTagPicker() },
-                   onRemove: { model.editor.removeTag($0) })
+            if model.editor.isReadOnly {
+                Label("Read only: this file isn’t UTF-8 text, so DocType shows it without changing it.",
+                      systemImage: "lock")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                TagRow(tags: model.editor.tags, onAdd: { model.showAddTagPicker() },
+                       onRemove: { model.editor.removeTag($0) })
+            }
         }
         .padding(.horizontal, 28)
         .padding(.top, 20)

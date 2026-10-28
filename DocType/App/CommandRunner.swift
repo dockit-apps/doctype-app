@@ -104,23 +104,28 @@ final class CommandRunner {
         case .renameNotebook:
             !model.selectedNotebook.isEmpty
         case .addTag:
-            model.selectedNotePath != nil
+            model.selectedNotePath != nil && !model.editor.isReadOnly
         case .removeTag:
-            model.selectedNotePath != nil && !model.editor.tags.isEmpty
+            model.selectedNotePath != nil && !model.editor.isReadOnly && !model.editor.tags.isEmpty
         case .find, .findAndReplace, .findNext, .findPrevious:
             model.selectedNotePath != nil
         case .searchNotes:
             model.hasUsableLibrary
         case .addRowAbove, .addRowBelow, .addColumnLeft, .addColumnRight, .deleteRow, .deleteColumn,
              .alignColumnLeft, .alignColumnCenter, .alignColumnRight:
-            model.selectedNotePath != nil && model.editor.hasFocus && model.editor.isInTable
+            canEditText && model.editor.isInTable
         case .bold, .italic, .inlineCode, .link:
-            // Only while typing in the note (or a table cell), so they never touch the title field.
-            model.selectedNotePath != nil && model.editor.hasFocus
+            canEditText
         case .heading1, .heading2, .heading3, .bodyText, .taskItem, .insertTable:
             // Whole lines: not inside a table cell.
-            model.selectedNotePath != nil && model.editor.hasFocus && !model.editor.isEditingTableCell
+            canEditText && !model.editor.isEditingTableCell
         }
+    }
+
+    /// Typing in the note (or a table cell) that can be changed. Only then, so
+    /// format commands never touch the title field or a read-only note.
+    private var canEditText: Bool {
+        model.selectedNotePath != nil && model.editor.hasFocus && !model.editor.isReadOnly
     }
 
     /// Commands for one menu, in registry order.

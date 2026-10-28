@@ -106,6 +106,7 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         cell = EditingCell(location: cellRange.location, contentRange: content, text: cellText,
                            isHeader: row == 0, alignment: TableEditing.alignment(ofColumn: column, in: table, text: text))
         editor.string = cellText.editorText
+        editor.isEditable = textView.isEditable  // a read-only note's cells can be selected, not changed
         restyleEditor()
         if editor.superview !== textView { textView.addSubview(editor) }
         editor.isHidden = false

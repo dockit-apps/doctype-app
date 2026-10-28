@@ -39,8 +39,8 @@ enum LibraryScanner {
     }
 
     static func readSummary(at url: URL, path: String, modified: Date?) -> NoteSummary {
-        // A file that isn't UTF-8 still shows up (by name) rather than vanishing.
-        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        // A file that isn't UTF-8 is still listed and searchable (NoteText).
+        let text = (try? Data(contentsOf: url)).map { NoteText.decode($0).text } ?? ""
         return NoteSummary.make(path: path, text: text, modified: modified ?? .distantPast)
     }
 

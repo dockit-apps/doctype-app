@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 
 extension EditorController {
     func attach(_ items: [IncomingAttachment], at location: Int) {
-        guard let library, let path else { return }
+        guard let library, let path, !isReadOnly else { return }
         Task {
             var links: [(markdown: String, isImage: Bool)] = []
             for item in items {
