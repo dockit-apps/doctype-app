@@ -20,6 +20,7 @@ public enum CommandID: String, CaseIterable, Sendable {
     case findAndReplace = "edit.findAndReplace"
     case findNext = "edit.findNext"
     case findPrevious = "edit.findPrevious"
+    case searchNotes = "library.search"
     case bold = "format.bold"
     case italic = "format.italic"
     case inlineCode = "format.inlineCode"
@@ -81,6 +82,8 @@ extension CommandID {
             Info(title: "Find Next", menu: .edit, defaultShortcuts: [.command("g")])
         case .findPrevious:
             Info(title: "Find Previous", menu: .edit, defaultShortcuts: [.command("g", .shift)])
+        case .searchNotes:
+            Info(title: "Search Notes…", menu: .edit, defaultShortcuts: [.command("f", .shift)])
         case .bold:
             Info(title: "Bold", menu: .format, defaultShortcuts: [.command("b")])
         case .italic:

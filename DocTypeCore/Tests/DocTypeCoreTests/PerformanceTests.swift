@@ -23,6 +23,22 @@ struct PerformanceTests {
         #expect(elapsed < .milliseconds(500))
     }
 
+    @Test func searchingTheFixtureLibraryStaysUnderBudget() async throws {
+        let library = Library(root: URL(fileURLWithPath: fixturesPath!))
+        try await library.scan()
+        let index = await library.index
+        let clock = ContinuousClock()
+
+        // Typing a query letter by letter: one search per keystroke.
+        var timings: [Duration] = []
+        for query in ["g", "gr", "gra", "grap", "graph", "graph b", "graph bf", "graph bfs", "zzzz-no-match"] {
+            timings.append(clock.measure { _ = NoteSearch(query).results(in: index, filter: .all) })
+        }
+        let worst = timings.max()!
+        print("Search per keystroke: max \(worst)")
+        #expect(worst < .milliseconds(50))
+    }
+
     @Test func typingInTheMiddleOfA5000LineNoteStaysUnderBudget() async throws {
         let url = URL(fileURLWithPath: fixturesPath!).appending(path: "Big/5000-lines.md")
         let body = String(Frontmatter.split(try String(contentsOf: url, encoding: .utf8)).body)

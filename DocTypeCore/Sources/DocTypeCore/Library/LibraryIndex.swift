@@ -53,10 +53,7 @@ public struct LibraryIndex: Sendable {
     public func notes(matching filter: Filter) -> [NoteSummary] {
         notes.values
             .filter { $0.matches(filter) }
-            .sorted { lhs, rhs in
-                lhs.modified != rhs.modified ? lhs.modified > rhs.modified
-                    : lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
-            }
+            .sorted(by: NoteSummary.newestFirst)
     }
 }
 

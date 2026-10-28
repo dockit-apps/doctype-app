@@ -1,4 +1,5 @@
-// What the note list needs to know about one note: title, snippet, tags, date.
+// What the note list needs to know about one note: title, snippet, tags, tasks,
+// date, plus the folded text that search looks in.
 // Built from the note's text with cheap line scanning (no markdown parsing),
 // so indexing a whole library stays fast.
 
@@ -12,19 +13,28 @@ public struct NoteSummary: Identifiable, Hashable, Sendable {
     public let title: String
     public let snippet: String
     public let tags: [String]
+    /// Checked and total task items, for the progress shown in the list.
+    public let tasks: TaskProgress
     public let modified: Date
+    /// The whole text (title, frontmatter and body) folded for searching; see NoteSearch.
+    let searchText: String
+    let searchTitle: String
 
     public var id: String { path }
 
     /// Folder path of the notebook containing this note; `""` for the library root.
     public var notebook: String { (path as NSString).deletingLastPathComponent }
 
-    public init(path: String, title: String, snippet: String, tags: [String], modified: Date) {
+    public init(path: String, title: String, snippet: String, tags: [String],
+                tasks: TaskProgress = .none, modified: Date, searchText: String = "") {
         self.path = path
         self.title = title
         self.snippet = snippet
         self.tags = tags
+        self.tasks = tasks
         self.modified = modified
+        self.searchTitle = NoteSearch.fold(title)
+        self.searchText = searchText.isEmpty ? searchTitle : searchText
     }
 
     public static func make(path: String, text: String, modified: Date) -> NoteSummary {
@@ -35,8 +45,16 @@ public struct NoteSummary: Identifiable, Hashable, Sendable {
             title: title,
             snippet: Snippet.make(from: body, title: title),
             tags: frontmatter?.tags ?? [],
-            modified: modified
+            tasks: TaskCounter.count(in: body),
+            modified: modified,
+            searchText: NoteSearch.fold(title + "\n" + text)
         )
+    }
+
+    /// The note list's order: most recently modified first, then by title.
+    public static func newestFirst(_ lhs: NoteSummary, _ rhs: NoteSummary) -> Bool {
+        lhs.modified != rhs.modified ? lhs.modified > rhs.modified
+            : lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
     }
 }
 
