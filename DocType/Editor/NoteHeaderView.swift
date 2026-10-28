@@ -40,10 +40,12 @@ struct NoteHeaderView: View {
                        onRemove: { model.editor.removeTag($0) })
             }
         }
-        .padding(.horizontal, 28)
+        // The text's column (MarkdownTextView), so title, tags and text line up.
+        .frame(maxWidth: MarkdownTextView.textColumnWidth, alignment: .leading)
+        .padding(.horizontal, MarkdownTextView.minimumTextMargin)
         .padding(.top, 20)
         .padding(.bottom, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear { draft = title }
         .onChange(of: path) { draft = title }

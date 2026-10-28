@@ -24,6 +24,22 @@ final class MarkdownTextView: NSTextView {
     var onTableOperation: (_ operation: TableOperation, _ location: Int) -> Void = { _, _ in }
 
     private static let verticalInset: CGFloat = 20
+    private static let minimumHorizontalInset: CGFloat = 24
+    private static let lineFragmentPadding: CGFloat = 5
+
+    /// The widest the text gets: 70 digit widths of the body font (CSS's
+    /// `70ch`), a comfortable line length. Wider windows center it.
+    static let textColumnWidth = (("0" as NSString).size(withAttributes: [.font: EditorTheme.bodyFont]).width * 70).rounded()
+    /// Where the text starts in a window too narrow to center it: the note
+    /// header uses the same, so title, tags and text line up.
+    static let minimumTextMargin = minimumHorizontalInset + lineFragmentPadding
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let column = Self.textColumnWidth + 2 * Self.lineFragmentPadding
+        let inset = max(Self.minimumHorizontalInset, ((newSize.width - column) / 2).rounded(.down))
+        if textContainerInset.width != inset { textContainerInset.width = inset }
+    }
     /// Extra room under the text (see StyleApplier.updateTrailingSpace). The
     /// inset applies above and below, so half goes in it and the origin moves up
     /// by that half: only the bottom grows.
@@ -385,7 +401,8 @@ final class MarkdownTextView: NSTextView {
         typingAttributes = EditorTheme.baseAttributes
         drawsBackground = true
         backgroundColor = .textBackgroundColor
-        textContainerInset = NSSize(width: 24, height: Self.verticalInset)
+        textContainerInset = NSSize(width: Self.minimumHorizontalInset, height: Self.verticalInset)
+        textContainer?.lineFragmentPadding = Self.lineFragmentPadding
 
         isVerticallyResizable = true
         isHorizontallyResizable = false

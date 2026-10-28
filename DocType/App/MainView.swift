@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 
 struct MainView: View {
     @Environment(AppModel.self) private var model
+    /// With Reduce Motion on, the palette and the banner only fade.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         @Bindable var model = model
         NavigationSplitView(columnVisibility: $model.columnVisibility) {
@@ -66,7 +68,7 @@ struct MainView: View {
                             onUseDiskVersion: { Task { await model.editor.resolveConflict(.useDiskVersion) } }
                         )
                         .padding(.bottom, 16)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     }
                 }
                 .animation(.snappy(duration: 0.2), value: model.editor.pendingDiskText != nil)
@@ -90,7 +92,7 @@ struct MainView: View {
                 )
                 .padding(.top, 60)
             }
-            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
         }
     }
 

@@ -32,6 +32,22 @@ struct EditorTypingTests {
         textView.textStorage?.attribute(.font, at: location, effectiveRange: nil) as? NSFont
     }
 
+    @Test func theTextColumnIsAReadableWidthCenteredInWideWindows() async throws {
+        let (editor, folder) = try await editor(showing: String(repeating: "word ", count: 200))
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let column = MarkdownTextView.textColumnWidth
+        #expect(column > 550 && column < 750)  // about 70 characters
+
+        textView.setFrameSize(NSSize(width: 1400, height: 800))
+        let wide = try #require(textView.textContainer)
+        #expect(abs(wide.size.width - 2 * wide.lineFragmentPadding - column) <= 1)
+        #expect(abs(textView.textContainerInset.width - (1400 - wide.size.width) / 2) <= 1)  // centered
+
+        textView.setFrameSize(NSSize(width: 500, height: 800))
+        #expect(textView.textContainerInset.width == MarkdownTextView.minimumTextMargin - wide.lineFragmentPadding)
+    }
+
     @Test func aNoteThatIsntUTF8OpensReadOnlyAndIsNeverSaved() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "DocTypeAppTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
