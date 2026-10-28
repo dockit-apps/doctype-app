@@ -94,7 +94,7 @@ public enum TableEditing {
         line.length > 0 && !TableRowParsing.cells(in: line, of: text).pipes.isEmpty
     }
 
-    private static func isDelimiterRow(_ line: NSRange, in text: NSString) -> Bool {
+    static func isDelimiterRow(_ line: NSRange, in text: NSString) -> Bool {
         delimiterRow.firstMatch(in: text as String, range: line) != nil
     }
 
@@ -106,9 +106,19 @@ public enum TableEditing {
         let location = selection.location
         let line = lineContaining(location, in: text)
         let body = "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |"
-        // A blank line before and after keeps it apart from the text around it.
-        let before = location > line.location ? "\n\n" : ""
-        let after = location < line.upperBound ? "\n\n" : ""
+        // A blank line before and after keeps it apart from the text around it:
+        // right under a list item or a quote, it would be part of that instead.
+        func isBlank(_ line: NSRange) -> Bool {
+            text.substring(with: line).allSatisfy { $0 == " " || $0 == "\t" }
+        }
+        let before = if location > line.location { "\n\n" }
+            else if line.location > 0, !isBlank(lineContaining(line.location - 1, in: text)) { "\n" }
+            else { "" }
+        var nextLine = 0
+        text.getLineStart(nil, end: &nextLine, contentsEnd: nil, for: line)
+        let after = if location < line.upperBound { "\n\n" }
+            else if nextLine < text.length, !isBlank(lineContaining(nextLine, in: text)) { "\n" }
+            else { "" }
         let start = location + (before as NSString).length
         return TextEdit(range: NSRange(location: location, length: 0), replacement: before + body + after,
                         selectionAfter: NSRange(location: start + 2, length: 8))

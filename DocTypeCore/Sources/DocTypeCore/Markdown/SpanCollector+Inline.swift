@@ -157,6 +157,11 @@ extension SpanCollector {
             default: .left
             }
         }
+        // Right after a paragraph, cmark-gfm starts the table at the paragraph's
+        // first line; the table really starts on the line before the `|---|` row.
+        guard let delimiter = lines.firstIndex(where: { TableEditing.isDelimiterRow($0, in: source) }),
+              delimiter >= 1 else { return }
+        lines.removeFirst(delimiter - 1)
         guard let firstLine = lines.first, let lastLine = lines.last else { return }
         let tableRange = NSRange(location: firstLine.location, length: lastLine.upperBound - firstLine.location)
         for (index, line) in lines.enumerated() {

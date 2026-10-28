@@ -177,6 +177,34 @@ struct EditorRichContentTests {
         #expect(image(at: 0, in: textView)?.size == CGSize(width: 400, height: 200))
     }
 
+    /// Return after an image at the end of a note: the new empty line goes
+    /// under the picture, and the picture stays right under its syntax.
+    @Test func returnAfterTheLastImageKeepsItUnderItsLine() async throws {
+        let text = "Intro\n\n![Pic](pic.png)"
+        let (editor, folder, window) = try await editor(showing: text, files: ["pic.png": png(width: 800, height: 400)])
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        let pic = (text as NSString).range(of: "![Pic](pic.png)")
+        let line = center(of: NSRange(location: pic.location, length: 1), in: textView, window)
+        func imageTop() throws -> CGFloat {
+            layOut(textView)
+            return try #require(textView.imageHit(at: NSPoint(x: textView.textContainerOrigin.x + 30, y: line.y + 100))).frame.minY
+        }
+        // Measured with the cursor off the image's line, where its syntax is hidden.
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let before = try imageTop()
+        #expect(before < line.y + 20)
+        // TextKit leaves out the last paragraph's spacing; the editor adds it below.
+        #expect(textView.trailingSpace == 200 + 2 * EditorTheme.imageGap)
+
+        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        #expect(try imageTop() == before)
+        #expect(textView.trailingSpace == 0)  // the empty last line keeps the spacing
+        let cursor = textView.firstRect(forCharacterRange: textView.selectedRange(), actualRange: nil)
+        #expect(textView.convert(window.convertFromScreen(cursor), from: nil).minY > before + 200)
+    }
+
     @Test func anImageTypedLaterAppearsOnceMeasured() async throws {
         let (editor, folder, _) = try await editor(showing: "start\n", files: ["later.png": png(width: 60, height: 30)])
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -346,6 +374,59 @@ struct EditorRichContentTests {
         let addRow = try #require(buttons().first { $0.0 == .addRowBelow })
         editor.performTableOperation(addRow.0, at: addRow.1)
         #expect(textView.string == "| A | B |\n|---|---|\n| 1 | 2 |\n|  |  |\n\nend")
+    }
+
+    /// The report: a table inserted under a task list, filled in with Tab. Its
+    /// header must stay the header (not hide as the `|---|` row) and the empty
+    /// row must be the one typed into.
+    @Test func aTableInsertedUnderAListFillsInWithTab() async throws {
+        let (editor, folder, window) = try await editor(showing: "- [ ] test\n")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+
+        editor.insertTable()
+        textView.insertText("test", replacementRange: textView.selectedRange())
+        textView.doCommand(by: #selector(NSResponder.insertTab(_:)))
+        textView.insertText("test2", replacementRange: textView.selectedRange())
+        textView.doCommand(by: #selector(NSResponder.insertTab(_:)))
+        textView.insertText("x", replacementRange: textView.selectedRange())
+        #expect(textView.string == "- [ ] test\n\n| test | test2 |\n| --- | --- |\n| x |  |")
+
+        layOut(textView)
+        let string = textView.string as NSString
+        func rowHeight(_ piece: String) -> CGFloat {
+            textView.firstRect(forCharacterRange: NSRange(location: string.range(of: piece).location, length: 1),
+                               actualRange: nil).height
+        }
+        #expect(rowHeight("test") > 10)
+        #expect(rowHeight("x") > 10)
+        #expect(rowHeight("---") < 1)  // the hidden |---| row
+        _ = window
+    }
+
+    /// A table at the very end of a note: its last row's "+" button is below
+    /// the text, where TextKit leaves no room of its own.
+    @Test func theAddRowButtonWorksAtTheEndOfANote() async throws {
+        let text = "| A | B |\n|---|---|\n| 1 | 2 |"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+        #expect(textView.trailingSpace == EditorTheme.tableRowPadding + EditorTheme.tableButtonSpace)
+
+        layOut(textView)
+        let row = center(of: (text as NSString).range(of: "1"), in: textView, window)
+        var hit: (operation: TableOperation, location: Int)?
+        for y in stride(from: row.y, to: row.y + 60, by: 1) {
+            for x in stride(from: textView.textContainerOrigin.x, to: textView.textContainerOrigin.x + 120, by: 2) {
+                if let found = textView.tableButtonHit(at: NSPoint(x: x, y: y)) { hit = found }
+            }
+            if hit != nil { break }
+        }
+        let button = try #require(hit)
+        #expect(button.operation == .addRowBelow)
+        editor.performTableOperation(button.operation, at: button.location)
+        #expect(textView.string == text + "\n|  |  |")
     }
 
     @Test func tabAndReturnMoveBetweenCells() async throws {

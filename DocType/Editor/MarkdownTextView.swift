@@ -25,6 +25,25 @@ final class MarkdownTextView: NSTextView {
     /// True if `location` is inside a table (decides whether the context menu offers table items).
     var isInTable: (_ location: Int) -> Bool = { _ in false }
 
+    private static let verticalInset: CGFloat = 20
+    /// Extra room under the text (see StyleApplier.updateTrailingSpace). The
+    /// inset applies above and below, so half goes in it and the origin moves up
+    /// by that half: only the bottom grows.
+    var trailingSpace: CGFloat = 0 {
+        didSet {
+            guard trailingSpace != oldValue else { return }
+            textContainerInset.height = Self.verticalInset + halfTrailingSpace
+        }
+    }
+    /// Whole points, so the text isn't drawn on half pixels.
+    private var halfTrailingSpace: CGFloat { (trailingSpace / 2).rounded(.up) }
+
+    override var textContainerOrigin: NSPoint {
+        var origin = super.textContainerOrigin
+        origin.y -= halfTrailingSpace
+        return origin
+    }
+
     /// Called with files dropped or pasted into the editor and where they go.
     var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
 
@@ -136,7 +155,16 @@ final class MarkdownTextView: NSTextView {
         guard let layout = textLayoutManager else { return nil }
         let origin = textContainerOrigin
         let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
-        guard let fragment = layout.textLayoutFragment(for: inContainer) as? DecoratedLayoutFragment else { return nil }
+        // Under the last paragraph TextKit has no fragment, but its image or a
+        // table's "+" button may be drawn there (see StyleApplier.updateTrailingSpace).
+        var found = layout.textLayoutFragment(for: inContainer)
+        if found == nil {
+            layout.enumerateTextLayoutFragments(from: layout.documentRange.endLocation, options: [.reverse]) { last in
+                if inContainer.y >= last.layoutFragmentFrame.maxY { found = last }
+                return false
+            }
+        }
+        guard let fragment = found as? DecoratedLayoutFragment else { return nil }
         let frame = fragment.layoutFragmentFrame
         return (fragment, CGPoint(x: inContainer.x - frame.minX, y: inContainer.y - frame.minY))
     }
@@ -269,7 +297,7 @@ final class MarkdownTextView: NSTextView {
         typingAttributes = EditorTheme.baseAttributes
         drawsBackground = true
         backgroundColor = .textBackgroundColor
-        textContainerInset = NSSize(width: 24, height: 20)
+        textContainerInset = NSSize(width: 24, height: Self.verticalInset)
 
         isVerticallyResizable = true
         isHorizontallyResizable = false

@@ -127,4 +127,17 @@ struct TableEditingTests {
         #expect(show(TableEditing.insertTable(in: empty, selection: cursor), on: empty)
                 == "| [[Column 1]] | Column 2 |\n| --- | --- |\n|  |  |")
     }
+
+    /// Right under a list item or a quote, a table would be part of that block.
+    @Test func insertingATableKeepsABlankLineFromTheTextAround() {
+        let (list, end) = parse("- [ ] task\n^")
+        #expect(show(TableEditing.insertTable(in: list, selection: end), on: list)
+                == "- [ ] task\n\n| [[Column 1]] | Column 2 |\n| --- | --- |\n|  |  |")
+        let (between, cursor) = parse("above\n^\nbelow")
+        #expect(show(TableEditing.insertTable(in: between, selection: cursor), on: between)
+                == "above\n\n| [[Column 1]] | Column 2 |\n| --- | --- |\n|  |  |\n\nbelow")
+        let (spaced, blank) = parse("above\n\n^\n\nbelow")
+        #expect(show(TableEditing.insertTable(in: spaced, selection: blank), on: spaced)
+                == "above\n\n| [[Column 1]] | Column 2 |\n| --- | --- |\n|  |  |\n\nbelow")
+    }
 }

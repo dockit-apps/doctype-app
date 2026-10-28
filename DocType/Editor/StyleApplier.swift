@@ -54,6 +54,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         isReplacingDocument = true
         defer { isReplacingDocument = false }
         storage.setAttributedString(attributed)
+        updateTrailingSpace(in: storage)
         if !unmeasured.isEmpty { onUnmeasuredImages(unmeasured, whole) }
     }
 
@@ -146,6 +147,21 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
             restyle()
         }
         styledSelection = selection
+        updateTrailingSpace(in: storage)
+    }
+
+    /// TextKit leaves out the spacing under a note's last paragraph, where an
+    /// image or a table's "+" button there is drawn; the editor adds it below the
+    /// text instead. With a line break at the end, the empty last line keeps it.
+    private func updateTrailingSpace(in storage: NSTextStorage) {
+        guard let textView = textView as? MarkdownTextView else { return }
+        let string = storage.mutableString
+        var space: CGFloat = 0
+        if string.length > 0, ![10, 13].contains(string.character(at: string.length - 1)) {  // "\n", "\r"
+            let style = storage.attribute(.paragraphStyle, at: string.length - 1, effectiveRange: nil) as? NSParagraphStyle
+            space = style?.paragraphSpacing ?? 0
+        }
+        textView.trailingSpace = space
     }
 
     private func apply(_ range: NSRange, in storage: NSTextStorage, selection: NSRange) {

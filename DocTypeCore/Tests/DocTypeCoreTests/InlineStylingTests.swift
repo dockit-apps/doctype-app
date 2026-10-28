@@ -151,6 +151,19 @@ struct InlineStylingTests {
                 ["0L: a \\| b ", "1L: c ", "0L:---", "1L:---", "0L:", "1L: z "])
     }
 
+    /// cmark-gfm starts a table right under a paragraph at the paragraph's
+    /// first line; the paragraph must not become the header row.
+    @Test func tableRightAfterAParagraphStartsAtItsHeader() {
+        let text = "text\n| a | b |\n|---|---|\n| 1 | 2 |" as NSString
+        let rows = MarkdownStyler.spans(in: text, blocks: BlockMap(text: text).blocks).compactMap { span -> String? in
+            guard case .tableRow(let index, _) = span.style else { return nil }
+            #expect(span.revealRange == NSRange(location: 5, length: text.length - 5))
+            return "\(index):\(text.substring(with: span.range))"
+        }
+        #expect(rows == ["0:| a | b |", "1:|---|---|", "2:| 1 | 2 |"])
+        #expect(!has(text as String, "text", .strong))
+    }
+
     @Test func headerRowIsBold() {
         #expect(has("| Name | Grade |\n|---|---|\n| Al | 1 |", " Name ", .strong))
         #expect(!has("| Name | Grade |\n|---|---|\n| Al | 1 |", " Al ", .strong))

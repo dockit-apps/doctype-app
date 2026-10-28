@@ -141,6 +141,7 @@ enum EditorTheme {
 
     /// Room above and below each row's text, inside the grid.
     nonisolated static let tableRowPadding: CGFloat = 5
+    nonisolated static let tableLineSpacing: CGFloat = 3
     /// Extra room under a table's last row for its "add row" button.
     nonisolated static let tableButtonSpace: CGFloat = 20
 
@@ -157,7 +158,7 @@ enum EditorTheme {
             text.addAttributes(concealedAttributes, range: paragraph)
             style.maximumLineHeight = 1
         } else {
-            style.lineSpacing = 3
+            style.lineSpacing = tableLineSpacing
             style.paragraphSpacingBefore = tableRowPadding
             style.paragraphSpacing = tableRowPadding + (isLast ? tableButtonSpace : 0)
         }

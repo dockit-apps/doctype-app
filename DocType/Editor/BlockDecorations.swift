@@ -108,6 +108,24 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         return CGRect(x: -layoutFragmentFrame.minX, y: 0, width: containerWidth, height: layoutFragmentFrame.height)
     }
 
+    /// The lines holding this paragraph's text. When the note ends with a line
+    /// break, TextKit adds an extra, empty line for the cursor to the last
+    /// paragraph's fragment, below its paragraph spacing; images and table rows
+    /// are measured without it.
+    private var textLines: ArraySlice<NSTextLineFragment> {
+        guard textLineFragments.count > 1, let last = textLineFragments.last, last.characterRange.length == 0
+        else { return textLineFragments[...] }
+        return textLineFragments.dropLast()
+    }
+
+    /// Where a table row's cells end, in fragment coordinates. The last row's
+    /// fragment can't be measured: as a note's last paragraph TextKit leaves out
+    /// its spacing, and the extra empty line may follow it.
+    private func tableRowBottom(_ row: TableRowAttribute) -> CGFloat {
+        guard row.isLast, let line = textLines.last else { return layoutFragmentFrame.height }
+        return line.typographicBounds.maxY + EditorTheme.tableLineSpacing + EditorTheme.tableRowPadding
+    }
+
     override var renderingSurfaceBounds: CGRect {
         let bounds = imageFrames.reduce(super.renderingSurfaceBounds.union(fullWidth)) { $0.union($1.frame.insetBy(dx: -4, dy: -4)) }
         return tableButtons.reduce(bounds) { $0.union($1.frame.insetBy(dx: -2, dy: -2)) }
@@ -143,11 +161,11 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         let size: CGFloat = 16
         var buttons: [(TableButton, CGRect)] = []
         if row.index == 0 {
-            let height = layoutFragmentFrame.height - (row.isLast ? EditorTheme.tableButtonSpace : 0)
+            let height = tableRowBottom(row)
             buttons.append((.addColumn, CGRect(x: right + 6, y: (height - size) / 2, width: size, height: size)))
         }
         if row.isLast {
-            let bottom = layoutFragmentFrame.height - EditorTheme.tableButtonSpace
+            let bottom = tableRowBottom(row)
             buttons.append((.addRow, CGRect(x: (left + right - size) / 2, y: bottom + 3, width: size, height: size)))
         }
         return buttons
@@ -157,7 +175,7 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
         let columns = tableColumnLines
         guard let left = columns.first, let right = columns.last else { return }
         let top = point.y
-        let bottom = point.y + layoutFragmentFrame.height - (row.isLast ? EditorTheme.tableButtonSpace : 0)
+        let bottom = point.y + tableRowBottom(row)
         context.saveGState()
         if row.index == 0 {
             context.setFillColor(Self.tableHeaderFill.cgColor)
@@ -203,7 +221,7 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
     var imageFrames: [(mark: ImageMark, frame: CGRect)] {
         guard !decorations.images.isEmpty else { return [] }
         let x = textLineFragments.first?.typographicBounds.minX ?? 0
-        var y = (textLineFragments.last?.typographicBounds.maxY ?? 0) + EditorTheme.imageGap
+        var y = (textLines.last?.typographicBounds.maxY ?? 0) + EditorTheme.imageGap
         return decorations.images.map { mark in
             defer { y += mark.image.size.height + EditorTheme.imageGap }
             return (mark, CGRect(origin: CGPoint(x: x, y: y), size: mark.image.size))
