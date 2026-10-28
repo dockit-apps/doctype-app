@@ -124,6 +124,29 @@ struct InlineStylingTests {
         #expect(markers.count == 7)  // 3 + delimiter row + 3
         #expect(markers.allSatisfy { $0.revealRange == nil })
     }
+
+    private func cells(_ text: String) -> [String] {
+        styled(text).compactMap { piece, style in
+            guard case .tableCell(_, let column, let alignment) = style else { return nil }
+            return "\(column)\(alignment == .left ? "L" : alignment == .right ? "R" : "C"):\(piece)"
+        }
+    }
+
+    @Test func everyCellIsMarkedWithItsColumnAndAlignment() {
+        #expect(cells("| a | bb |\n|:--|--:|\n| 1 | 2 |") ==
+                ["0L: a ", "1R: bb ", "0L::--", "1R:--:", "0L: 1 ", "1R: 2 "])
+        #expect(cells("a | b\n:-:|-\nx|") == ["0C:a ", "1L: b", "0C::-:", "1L:-", "0C:x"])
+    }
+
+    @Test func escapedPipesAndEmptyCells() {
+        #expect(cells("| a \\| b | c |\n|---|---|\n|| z |") ==
+                ["0L: a \\| b ", "1L: c ", "0L:---", "1L:---", "0L:", "1L: z "])
+    }
+
+    @Test func headerRowIsBold() {
+        #expect(has("| Name | Grade |\n|---|---|\n| Al | 1 |", " Name ", .strong))
+        #expect(!has("| Name | Grade |\n|---|---|\n| Al | 1 |", " Al ", .strong))
+    }
 }
 
 /// cmark-gfm can report a table cell column that falls inside a multi-byte

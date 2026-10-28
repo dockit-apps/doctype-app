@@ -39,6 +39,17 @@ public enum Style: Hashable, Sendable {
     case taskBox(checked: Bool)
     /// The text of a completed task.
     case completedTask
+
+    // Tables
+    /// The text between two pipes of a table row (spaces included). The editor
+    /// widens cells so each column lines up. Row 0 (the header) column 0 starts a
+    /// new table. Positions aren't stored, so styles don't change when text above moves.
+    case tableCell(row: Int, column: Int, alignment: TableAlignment)
+}
+
+/// How a table column's cells sit in it, from the `:---:` delimiter row.
+public enum TableAlignment: Hashable, Sendable {
+    case left, center, right
 }
 
 /// Kinds of code tokens the editor colors.

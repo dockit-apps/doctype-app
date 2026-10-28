@@ -74,6 +74,7 @@ enum EditorTheme {
                 text.addAttributes(attributes(for: span.style), range: span.range)
             }
         }
+        alignTableColumns(spans, in: text)
     }
 
     static func attributes(for style: Style) -> [NSAttributedString.Key: Any] {
@@ -100,7 +101,7 @@ enum EditorTheme {
         case .taskBox(let checked):
             // Keeps its width; BlockDecorations draws a checkbox there.
             [.foregroundColor: NSColor.clear, taskKey: checked]
-        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode:
+        case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell:
             [:]  // handled in apply(_:to:resetting:selection:)
         }
     }
@@ -116,6 +117,63 @@ enum EditorTheme {
         for (runRange, font) in runs {
             text.addAttribute(.font, value: transform(font), range: runRange)
         }
+    }
+
+    // MARK: - Tables
+
+    /// Lines up table columns without changing the text: each cell is measured as
+    /// styled, and the narrower ones get extra space (kerning) on one character so
+    /// every column is as wide as its widest cell. Left-aligned cells get the space
+    /// after their text, right-aligned ones before it (on the opening pipe),
+    /// centered ones half on each side; an empty cell gets it on its opening pipe.
+    /// A row wider than the editor still wraps.
+    private static func alignTableColumns(_ spans: [StyleSpan], in text: NSMutableAttributedString) {
+        var table: [(range: NSRange, column: Int, alignment: TableAlignment)] = []
+        for span in spans {
+            guard case .tableCell(let row, let column, let alignment) = span.style else { continue }
+            if row == 0, column == 0 {
+                widen(table, in: text)
+                table.removeAll(keepingCapacity: true)
+            }
+            table.append((span.range, column, alignment))
+        }
+        widen(table, in: text)
+    }
+
+    private static func widen(_ cells: [(range: NSRange, column: Int, alignment: TableAlignment)],
+                              in text: NSMutableAttributedString) {
+        guard !cells.isEmpty else { return }
+        let widths = cells.map { $0.range.length == 0 ? 0 : text.attributedSubstring(from: $0.range).size().width }
+        var columnWidths: [Int: CGFloat] = [:]
+        for (cell, width) in zip(cells, widths) { columnWidths[cell.column] = max(columnWidths[cell.column] ?? 0, width) }
+
+        let string = text.mutableString
+        for (cell, width) in zip(cells, widths) {
+            let extra = (columnWidths[cell.column] ?? width) - width
+            guard extra >= 0.5 else { continue }
+            let opening = cell.range.location - 1
+            let hasOpeningPipe = opening >= 0 && string.character(at: opening) == 124  // "|"
+            // On the cell's last character, usually its trailing space: TextKit puts
+            // the caret halfway into extra space, so the end of the text keeps a
+            // normal caret position.
+            let last = cell.range.length > 0 ? cell.range.upperBound - 1 : nil
+            switch (cell.alignment, hasOpeningPipe, last) {
+            case (.right, true, _), (_, true, nil):
+                addKern(extra, at: opening, in: text)
+            case (.center, true, let last?):
+                addKern(extra / 2, at: opening, in: text)
+                addKern(extra / 2, at: last, in: text)
+            case (_, _, let last?):
+                addKern(extra, at: last, in: text)
+            default:
+                break
+            }
+        }
+    }
+
+    private static func addKern(_ amount: CGFloat, at location: Int, in text: NSMutableAttributedString) {
+        let current = text.attribute(.kern, at: location, effectiveRange: nil) as? CGFloat ?? 0
+        text.addAttribute(.kern, value: current + amount, range: NSRange(location: location, length: 1))
     }
 
     private static let quoteParagraphStyle: NSParagraphStyle = {

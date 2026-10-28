@@ -53,4 +53,50 @@ struct EditorRichContentTests {
         #expect(textView.linkDestination(at: center(of: string.range(of: "Read"), in: textView, window)) == nil)
         #expect(textView.linkDestination(at: center(of: string.range(of: "now"), in: textView, window)) == nil)
     }
+
+    // MARK: Tables
+
+    /// The x position of every pipe in each line of `text`.
+    private func pipeColumns(_ text: String, in textView: NSTextView, _ window: NSWindow) -> [[CGFloat]] {
+        let string = text as NSString
+        var rows: [[CGFloat]] = []
+        string.enumerateSubstrings(in: NSRange(location: 0, length: string.length), options: .byLines) { line, range, _, _ in
+            guard let line, line.contains("|") else { return }
+            var xs: [CGFloat] = []
+            for offset in 0..<range.length where string.character(at: range.location + offset) == 124 {
+                // TextKit reports a character's position halfway into the extra space
+                // (kerning) of the character before it; the glyph is drawn after all of it.
+                let pipe = range.location + offset
+                let rect = textView.firstRect(forCharacterRange: NSRange(location: pipe, length: 1), actualRange: nil)
+                let kernBefore = pipe > 0 ? textView.textStorage?.attribute(.kern, at: pipe - 1, effectiveRange: nil) as? CGFloat : nil
+                xs.append(textView.convert(window.convertFromScreen(rect), from: nil).minX + (kernBefore ?? 0) / 2)
+            }
+            rows.append(xs)
+        }
+        return rows
+    }
+
+    @Test func tableColumnsLineUpWithoutChangingTheText() async throws {
+        let text = "| Name | Grade |\n|---|:--:|\n| Alexandra Wide | 1.3 |\n| Bo | **10.0** |\n\nafter"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+
+        #expect(textView.string == text)
+        let rows = pipeColumns(text, in: textView, window)
+        #expect(rows.count == 4)
+        for row in rows.dropFirst() {
+            for (x, expected) in zip(row, rows[0]) { #expect(abs(x - expected) < 1, "\(rows)") }
+        }
+
+        // Typing in a cell re-aligns the whole table.
+        textView.setSelectedRange(NSRange(location: (text as NSString).range(of: "Bo").upperBound, length: 0))
+        textView.insertText("bby Longername", replacementRange: textView.selectedRange())
+        editor.styler.applyPendingStyles(in: textView.textStorage!)
+        layOut(textView)
+        let typed = pipeColumns(textView.string, in: textView, window)
+        for row in typed.dropFirst() {
+            for (x, expected) in zip(row, typed[0]) { #expect(abs(x - expected) < 1, "\(typed)") }
+        }
+    }
 }
