@@ -56,7 +56,7 @@ struct EditorRichContentTests {
 
     // MARK: Tables
 
-    /// The x position of every pipe in each line of `text`.
+    /// The x position of every grid line (inside each stretched pipe) in each line of `text`.
     private func pipeColumns(_ text: String, in textView: NSTextView, _ window: NSWindow) -> [[CGFloat]] {
         let string = text as NSString
         var rows: [[CGFloat]] = []
@@ -64,12 +64,10 @@ struct EditorRichContentTests {
             guard let line, line.contains("|") else { return }
             var xs: [CGFloat] = []
             for offset in 0..<range.length where string.character(at: range.location + offset) == 124 {
-                // TextKit reports a character's position halfway into the extra space
-                // (kerning) of the character before it; the glyph is drawn after all of it.
                 let pipe = range.location + offset
                 let rect = textView.firstRect(forCharacterRange: NSRange(location: pipe, length: 1), actualRange: nil)
-                let kernBefore = pipe > 0 ? textView.textStorage?.attribute(.kern, at: pipe - 1, effectiveRange: nil) as? CGFloat : nil
-                xs.append(textView.convert(window.convertFromScreen(rect), from: nil).minX + (kernBefore ?? 0) / 2)
+                let lineOffset = textView.textStorage?.attribute(EditorTheme.tablePipeKey, at: pipe, effectiveRange: nil) as? CGFloat
+                xs.append(textView.convert(window.convertFromScreen(rect), from: nil).minX + (lineOffset ?? 0))
             }
             rows.append(xs)
         }
@@ -101,6 +99,44 @@ struct EditorRichContentTests {
         for row in typed.dropFirst() {
             for (x, expected) in zip(row, typed[0]) { #expect(abs(x - expected) < 1, "\(typed)") }
         }
+    }
+
+    /// The report: a cell's text sat wherever its spaces put it, and in an
+    /// empty cell the cursor floated in the middle, away from the typed text.
+    @Test func cellTextStartsAtTheSamePlaceAndTheCursorStaysWithIt() async throws {
+        let text = "| Column 1 | Column 2 |\n| --- | --- |\n| test | test |\n|test|test|\n|   test|  |"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let string = text as NSString
+        func x(_ location: Int) -> CGFloat {
+            let rect = textView.firstRect(forCharacterRange: NSRange(location: location, length: 0), actualRange: nil)
+            return textView.convert(window.convertFromScreen(rect), from: nil).minX
+        }
+        var tests: [Int] = []
+        var search = NSRange(location: 0, length: string.length)
+        while case let found = string.range(of: "test", range: search), found.location != NSNotFound {
+            tests.append(found.location)
+            search = NSRange(location: found.upperBound, length: string.length - found.upperBound)
+        }
+        #expect(tests.count == 5)
+        // Column 1 in every row, however many spaces: the same x.
+        let firstColumn = [tests[0], tests[2], tests[4]].map(x)
+        #expect(firstColumn.allSatisfy { abs($0 - firstColumn[0]) < 0.5 }, "\(firstColumn)")
+        #expect(abs(x(tests[1]) - x(tests[3])) < 0.5)
+
+        // An empty cell: the cursor is at the cell's start, and after typing it
+        // sits right after the text.
+        let emptyCell = string.length - 2
+        textView.setSelectedRange(NSRange(location: emptyCell, length: 0))
+        #expect(abs(x(emptyCell) - x(tests[1])) < 0.5)
+        textView.insertText("ab", replacementRange: textView.selectedRange())
+        editor.styler.applyPendingStyles(in: textView.textStorage!)
+        layOut(textView)
+        let typed = (textView.string as NSString).range(of: "ab")
+        #expect(abs(x(typed.location) - x(tests[1])) < 0.5)
+        let glyphEnd = textView.firstRect(forCharacterRange: NSRange(location: typed.location + 1, length: 1), actualRange: nil)
+        #expect(abs(x(textView.selectedRange().location) - window.convertFromScreen(glyphEnd).maxX) < 0.5)
     }
 
     // MARK: Images
@@ -225,7 +261,8 @@ struct EditorRichContentTests {
 
         #expect(ImageStore.shared.thumbnail(for: url, maxPixelSize: 512) == nil)  // starts decoding
         var thumbnail: CGImage?
-        for _ in 0..<100 where thumbnail == nil {
+        // Up to 10 s: the decode runs in the background alongside the other tests.
+        for _ in 0..<500 where thumbnail == nil {
             try await Task.sleep(for: .milliseconds(20))
             thumbnail = ImageStore.shared.thumbnail(for: url, maxPixelSize: 512)
         }

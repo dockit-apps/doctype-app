@@ -37,7 +37,8 @@ final class BlockDecorations: NSObject, NSTextLayoutManagerDelegate {
         }
         if decorations.tableRow != nil {
             string.enumerateAttribute(EditorTheme.tablePipeKey, in: whole) { value, pipeRange, _ in
-                if value != nil { decorations.tablePipes += pipeRange.location..<pipeRange.upperBound }
+                guard let offset = value as? CGFloat else { return }
+                decorations.tablePipes += (pipeRange.location..<pipeRange.upperBound).map { ($0, offset) }
             }
         }
         string.enumerateAttribute(EditorTheme.imageKey, in: whole) { value, imageRange, _ in
@@ -73,8 +74,9 @@ nonisolated struct Decorations {
     var marks: [ListMark] = []
     var images: [ImageMark] = []
     var tableRow: TableRowAttribute?
-    /// Pipe positions within the paragraph (where the grid's vertical lines go).
-    var tablePipes: [Int] = []
+    /// Pipe positions within the paragraph, and how far into each (stretched)
+    /// pipe its grid line goes.
+    var tablePipes: [(location: Int, lineOffset: CGFloat)] = []
     var isNeeded: Bool { codeBlock != nil || quote || rule || !marks.isEmpty || !images.isEmpty || tableRow != nil }
 }
 
@@ -139,19 +141,13 @@ nonisolated final class DecoratedLayoutFragment: NSTextLayoutFragment {
 
     private static let tableLine = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.16)
     private static let tableHeaderFill = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.04)
-    /// Half the width of "|", to put grid lines through the middle of the pipes.
-    private static let halfPipeWidth: CGFloat = ("|" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 15)]).width / 2
-
-    /// Where the grid's vertical lines go, in fragment coordinates: through each
-    /// pipe. TextKit reports a character halfway into the extra space (kerning)
-    /// of the one before it, and the glyph is drawn after all of it.
+    /// Where the grid's vertical lines go, in fragment coordinates: inside each
+    /// stretched pipe, at its stored offset.
     private var tableColumnLines: [CGFloat] {
-        guard let line = textLineFragments.first, let paragraph = textElement as? NSTextParagraph else { return [] }
-        let string = paragraph.attributedString
+        guard let line = textLineFragments.first else { return [] }
         return decorations.tablePipes.compactMap { pipe in
-            guard NSLocationInRange(pipe, line.characterRange) else { return nil }
-            let kernBefore = pipe > 0 ? (string.attribute(.kern, at: pipe - 1, effectiveRange: nil) as? CGFloat ?? 0) : 0
-            return line.typographicBounds.minX + line.locationForCharacter(at: pipe).x + kernBefore / 2 + Self.halfPipeWidth
+            guard NSLocationInRange(pipe.location, line.characterRange) else { return nil }
+            return line.typographicBounds.minX + line.locationForCharacter(at: pipe.location).x + pipe.lineOffset
         }
     }
 

@@ -20,7 +20,8 @@ enum EditorTheme {
     static let taskKey = NSAttributedString.Key("DocTypeTask")
     /// Marks a table row's line, for drawing the grid (value: TableRowAttribute).
     static let tableRowKey = NSAttributedString.Key("DocTypeTableRow")
-    /// Marks a table's pipe characters, where the grid's vertical lines go.
+    /// Marks a table's pipe characters, where the grid's vertical lines go. The
+    /// value is the line's offset into the (stretched) pipe; see EditorTheme+Tables.
     static let tablePipeKey = NSAttributedString.Key("DocTypeTablePipe")
     /// Marks a link's text; the value is its destination (⌘-click opens it).
     static let linkKey = NSAttributedString.Key("DocTypeLink")
@@ -117,8 +118,8 @@ enum EditorTheme {
             // Keeps its width; BlockDecorations draws a checkbox there.
             [.foregroundColor: NSColor.clear, taskKey: checked]
         case .tablePipe:
-            // Keeps its width (columns line up on it); BlockDecorations draws the grid line.
-            [.foregroundColor: NSColor.clear, tablePipeKey: true]
+            // Stretched to space the columns, and the grid line drawn in it (EditorTheme+Tables).
+            [.foregroundColor: NSColor.clear]
         case .horizontalRule, .hiddenMarker, .strong, .emphasis, .inlineCode, .tableCell, .tableRow, .image:
             [:]  // handled in apply(_:to:resetting:selection:)
         }
@@ -163,61 +164,6 @@ enum EditorTheme {
         text.addAttributes([.paragraphStyle: style,
                             tableRowKey: TableRowAttribute(index: index, isLast: isLast, isActive: isActive)],
                            range: paragraph)
-    }
-
-    /// Lines up table columns without changing the text: each cell is measured as
-    /// styled, and the narrower ones get extra space (kerning) on one character so
-    /// every column is as wide as its widest cell. Left-aligned cells get the space
-    /// after their text, right-aligned ones before it (on the opening pipe),
-    /// centered ones half on each side; an empty cell gets it on its opening pipe.
-    /// A row wider than the editor still wraps.
-    private static func alignTableColumns(_ spans: [StyleSpan], in text: NSMutableAttributedString) {
-        var table: [(range: NSRange, column: Int, alignment: TableAlignment)] = []
-        for span in spans {
-            guard case .tableCell(let row, let column, let alignment) = span.style else { continue }
-            if row == 0, column == 0 {
-                widen(table, in: text)
-                table.removeAll(keepingCapacity: true)
-            }
-            table.append((span.range, column, alignment))
-        }
-        widen(table, in: text)
-    }
-
-    private static func widen(_ cells: [(range: NSRange, column: Int, alignment: TableAlignment)],
-                              in text: NSMutableAttributedString) {
-        guard !cells.isEmpty else { return }
-        let widths = cells.map { $0.range.length == 0 ? 0 : text.attributedSubstring(from: $0.range).size().width }
-        var columnWidths: [Int: CGFloat] = [:]
-        for (cell, width) in zip(cells, widths) { columnWidths[cell.column] = max(columnWidths[cell.column] ?? 0, width) }
-
-        let string = text.mutableString
-        for (cell, width) in zip(cells, widths) {
-            let extra = (columnWidths[cell.column] ?? width) - width
-            guard extra >= 0.5 else { continue }
-            let opening = cell.range.location - 1
-            let hasOpeningPipe = opening >= 0 && string.character(at: opening) == 124  // "|"
-            // On the cell's last character, usually its trailing space: TextKit puts
-            // the caret halfway into extra space, so the end of the text keeps a
-            // normal caret position.
-            let last = cell.range.length > 0 ? cell.range.upperBound - 1 : nil
-            switch (cell.alignment, hasOpeningPipe, last) {
-            case (.right, true, _), (_, true, nil):
-                addKern(extra, at: opening, in: text)
-            case (.center, true, let last?):
-                addKern(extra / 2, at: opening, in: text)
-                addKern(extra / 2, at: last, in: text)
-            case (_, _, let last?):
-                addKern(extra, at: last, in: text)
-            default:
-                break
-            }
-        }
-    }
-
-    private static func addKern(_ amount: CGFloat, at location: Int, in text: NSMutableAttributedString) {
-        let current = text.attribute(.kern, at: location, effectiveRange: nil) as? CGFloat ?? 0
-        text.addAttribute(.kern, value: current + amount, range: NSRange(location: location, length: 1))
     }
 
     private static let quoteParagraphStyle: NSParagraphStyle = {

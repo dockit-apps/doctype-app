@@ -318,7 +318,7 @@ public enum TableEditing {
     }
 
     /// A cell's text without its padding; for an empty cell, a cursor after its first space.
-    static func contentRange(of cell: NSRange, in text: NSString) -> NSRange {
+    public static func contentRange(of cell: NSRange, in text: NSString) -> NSRange {
         let content = text.substring(with: cell) as NSString
         let leading = content.rangeOfCharacter(from: CharacterSet(charactersIn: " \t").inverted)
         guard leading.location != NSNotFound else {
