@@ -1,5 +1,5 @@
 // Builds the menu bar from the command registry: every command appears in its
-// menu with its shortcut, greyed out when it can't run.
+// menu with its shortcut (the user's, see ShortcutSettings), greyed out when it can't run.
 
 import DocTypeCore
 import SwiftUI
@@ -34,15 +34,11 @@ struct AppMenus: Commands {
 
     private func item(_ command: CommandID) -> some View {
         Button(command.title) { model.commands.run(command) }
-            .keyboardShortcut(command.info.defaultShortcuts.first?.keyboardShortcut)
+            .keyboardShortcut(model.shortcuts.shortcuts(for: command).first?.keyboardShortcut)
             .disabled(!model.commands.isEnabled(command))
     }
 
     private func items(for menu: MenuName) -> some View {
-        ForEach(model.commands.commands(in: menu), id: \.self) { command in
-            Button(command.title) { model.commands.run(command) }
-                .keyboardShortcut(command.info.defaultShortcuts.first?.keyboardShortcut)
-                .disabled(!model.commands.isEnabled(command))
-        }
+        ForEach(model.commands.commands(in: menu), id: \.self) { command in item(command) }
     }
 }

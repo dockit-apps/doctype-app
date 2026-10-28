@@ -48,6 +48,8 @@ final class AppModel {
     var selectedNotePath: String?
 
     @ObservationIgnored let editor = EditorController()
+    /// The keyboard shortcuts, the user's changes included.
+    @ObservationIgnored let shortcuts = ShortcutSettings()
     @ObservationIgnored private(set) lazy var commands = CommandRunner(model: self)
     /// Where keyboard focus was before the palette opened, to put it back after.
     @ObservationIgnored private weak var focusBeforePalette: NSResponder?
@@ -116,7 +118,7 @@ final class AppModel {
             .map { command in
                 PaletteItem(
                     id: command.rawValue, title: command.title,
-                    detail: command.info.defaultShortcuts.first?.displayString,
+                    detail: shortcuts.shortcuts(for: command).first?.displayString,
                     action: { [weak self] in self?.commands.run(command) }
                 )
             }

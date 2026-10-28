@@ -38,7 +38,7 @@ Check: `grep -rE "import (SwiftUI|AppKit)" DocTypeCore/Sources` must print nothi
 
 ### Keyboard shortcut → command → action
 
-1. **Menu item.** You press a shortcut, say ⌘N. AppKit offers it to the main menu, where **File ▸ New Note** exists because `AppMenus` generated it from `CommandID.newNote`. The title, menu and shortcut come from `CommandID.info` in core, and the core `Shortcut` is converted to a SwiftUI `KeyboardShortcut` in `Shortcut+Platform.swift`.
+1. **Menu item.** You press a shortcut, say ⌘N. AppKit offers it to the main menu, where **File ▸ New Note** exists because `AppMenus` generated it from `CommandID.newNote`. The title and menu come from `CommandID.info` in core. The shortcut comes from core `ShortcutMap` (the defaults in `CommandID.info` with the user's changes from Settings on top, kept in UserDefaults by `ShortcutSettings`), and the core `Shortcut` is converted to a SwiftUI `KeyboardShortcut` in `Shortcut+Platform.swift`. Menus, palette hints and the key monitor all read the same map, so a change in Settings shows everywhere at once.
 2. **Single entry point.** The menu item calls `model.commands.run(.newNote)`. The command palette makes the same call when you pick "New Note". So does the key monitor in `AppDelegate` for alternate shortcuts a menu can't show (⇧⌘P for the palette).
 3. **Dispatch.** `CommandRunner.run` checks `isEnabled`, which is the same check that greys out the menu item and hides the command from the palette. An exhaustive `switch` then calls the behavior, here `AppModel.createNote()`.
 4. **Core does the work.** `createNote()` calls `Library.createNote(in:)`. The actor picks a free name (`Untitled`, `Untitled 2`, …), writes the file atomically off the main thread, and publishes a new index snapshot.
@@ -51,7 +51,7 @@ Later, MCP tools and `doctype://` URLs will call the same core functions with ex
 1. **Add a case** to `CommandID` in `DocTypeCore/Sources/DocTypeCore/Commands/CommandID.swift`, with a stable raw value such as `"note.duplicate"`.
 2. **Build.** The compiler stops at the `info` switch in the same file. Add the title, the menu it belongs to, and the default shortcut(s), or none. The first shortcut is shown in the menu; any others also trigger the command.
 3. **Build again.** The compiler now stops at `run` and `isEnabled` in `DocType/App/CommandRunner.swift`. Add the behavior and when it's available. If the behavior is more than a line or two of wiring, put the logic in core (a `Library` method or a pure function) and call it from here.
-4. That's all. The menu item, its shortcut and the palette entry are generated. `swift test` checks that no two commands share a shortcut.
+4. That's all. The menu item, its shortcut and the palette entry are generated. `swift test` checks that no two commands share a shortcut and that none is one macOS reserves (`ShortcutMap.reserved`). The command also appears in Settings ▸ Shortcuts, where it can be rebound.
 
 ## Planned extension points
 

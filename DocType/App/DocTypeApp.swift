@@ -1,5 +1,5 @@
-// App entry point: declares the single main window. The AppModel lives in the
-// AppDelegate so quit handling can save through it.
+// App entry point: declares the single main window and Settings (⌘,). The
+// AppModel lives in the AppDelegate so quit handling can save through it.
 
 import SwiftUI
 
@@ -13,5 +13,9 @@ struct DocTypeApp: App {
                 .environment(appDelegate.model)
         }
         .commands { AppMenus(model: appDelegate.model) }
+
+        Settings {
+            SettingsView(shortcuts: appDelegate.model.shortcuts)
+        }
     }
 }

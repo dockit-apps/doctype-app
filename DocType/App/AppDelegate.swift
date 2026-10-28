@@ -21,13 +21,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // palette) are caught here and run the same command. Escape for the
         // palette is handled here too, so it works wherever the focus is.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
+            guard let self, model.shortcuts.recording == nil else { return event }  // a key for Settings
             if event.keyCode == 53, model.palette != nil {
                 model.dismissPalette()
                 return nil
             }
             for command in CommandID.allCases {
-                if command.info.defaultShortcuts.dropFirst().contains(where: { $0.matches(event) }) {
+                if model.shortcuts.shortcuts(for: command).dropFirst().contains(where: { $0.matches(event) }) {
                     model.commands.run(command)
                     return nil
                 }

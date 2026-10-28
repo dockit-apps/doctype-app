@@ -40,10 +40,56 @@ public struct Shortcut: Hashable, Sendable {
         if modifiers.contains(.shift) { result += "⇧" }
         if modifiers.contains(.command) { result += "⌘" }
         switch key {
+        case .character(" "): result += "Space"
+        case .character("\t"): result += "⇥"
         case .character(let character): result += character.uppercased()
         case .delete: result += "⌫"
         case .returnKey: result += "↩"
         }
         return result
+    }
+
+    // MARK: - Storage
+
+    private static let modifierNames: [(String, Modifiers)] =
+        [("ctrl", .control), ("opt", .option), ("shift", .shift), ("cmd", .command)]
+
+    /// A stable text form for settings, e.g. `shift+cmd+p`, `cmd+delete`.
+    public var storageString: String {
+        let names = Self.modifierNames.filter { modifiers.contains($0.1) }.map(\.0)
+        let keyName = switch key {
+        case .character(" "): "space"
+        case .character("\t"): "tab"
+        case .character(let character): String(character)
+        case .delete: "delete"
+        case .returnKey: "return"
+        }
+        return (names + [keyName]).joined(separator: "+")
+    }
+
+    /// Reads `storageString`; nil for anything else.
+    public init?(storageString: String) {
+        var rest = Substring(storageString)
+        var modifiers: Modifiers = []
+        var matched = true
+        while matched {
+            matched = false
+            for (name, modifier) in Self.modifierNames where rest.hasPrefix(name + "+") && rest.count > name.count + 1 {
+                rest = rest.dropFirst(name.count + 1)
+                modifiers.insert(modifier)
+                matched = true
+            }
+        }
+        let key: Key
+        switch rest {
+        case "space": key = .character(" ")
+        case "tab": key = .character("\t")
+        case "delete": key = .delete
+        case "return": key = .returnKey
+        default:
+            guard rest.count == 1, let character = rest.first else { return nil }
+            key = .character(Character(character.lowercased()))
+        }
+        self.init(key, modifiers)
     }
 }
