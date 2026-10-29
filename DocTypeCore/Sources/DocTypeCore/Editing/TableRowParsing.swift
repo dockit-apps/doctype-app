@@ -29,4 +29,18 @@ enum TableRowParsing {
         }
         return (cells, pipes)
     }
+
+    /// The rows of a table cmark-gfm parsed at `range` of `source`, one line
+    /// each, the header row first. Nil if there's no `|---|` row in it.
+    static func rows(ofTableAt range: NSRange, in source: NSString) -> [NSRange]? {
+        var lines: [NSRange] = []
+        source.enumerateSubstrings(in: range, options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
+            lines.append(lineRange)
+        }
+        // Right after a paragraph, cmark-gfm starts the table at the paragraph's
+        // first line; the table really starts on the line before the `|---|` row.
+        guard let delimiter = lines.firstIndex(where: { TableEditing.isDelimiterRow($0, in: source) }),
+              delimiter >= 1 else { return nil }
+        return Array(lines[(delimiter - 1)...])
+    }
 }

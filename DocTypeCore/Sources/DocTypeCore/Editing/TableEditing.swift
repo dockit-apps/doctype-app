@@ -51,71 +51,54 @@ public struct TableLayout: Equatable, Sendable {
 }
 
 public enum TableEditing {
+    /// A `|---|` row; also finds one among several lines.
     private static let delimiterRow = try! NSRegularExpression(
-        pattern: #"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$"#)
+        pattern: #"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$"#, options: .anchorsMatchLines)
 
     // MARK: - Finding a table
 
-    /// The table whose rows include `location`: a header row and a `|---|`
-    /// row with pipes, then the rows under them until a blank line. Nil outside
-    /// tables and inside code blocks.
-    ///
-    /// A line without pipes right under a table is a row too, the way GFM (and
-    /// so the styler, through cmark-gfm) reads it, unless it starts another
-    /// block such as a heading or a list: cmark-gfm decides, so the rows edited
-    /// are the rows drawn.
+    /// The table whose rows include `location`, as cmark-gfm reads it, so the
+    /// rows edited are the rows the styler draws: a header row, a `|---|` row
+    /// with as many cells, and the rows under them until a blank line or
+    /// another block (a line without pipes is a row too). Nil outside tables
+    /// and inside code blocks.
     public static func table(at location: Int, in text: NSString, blockMap: BlockMap) -> TableLayout? {
-        guard location >= 0, location <= text.length else { return nil }
-        if case .code = blockMap.blocks(in: NSRange(location: location, length: 0)).first?.kind { return nil }
-        let here = lineContaining(location, in: text)
-        guard !isBlank(here, in: text) else { return nil }
-
-        // Up to the top of the lines without a blank one, where the table must start
-        // (not past `maximumPlainRows` lines without pipes in a row: a long paragraph).
-        var lines = [here]
-        var plain = isRowLine(here, in: text) ? 0 : 1
-        while lines[0].location > 0, plain <= maximumPlainRows {
-            let previous = lineContaining(lines[0].location - 1, in: text)
-            guard !isBlank(previous, in: text) else { break }
-            plain = isRowLine(previous, in: text) ? 0 : plain + 1
-            lines.insert(previous, at: 0)
+        guard location >= 0, location <= text.length,
+              let block = blockMap.blocks(in: NSRange(location: location, length: 0)).first,
+              block.kind == .text, NSMaxRange(block.range) <= text.length,
+              !isBlank(lineContaining(location, in: text), in: text) else { return nil }
+        // This runs on every keystroke and selection change: only a block that
+        // could hold a table is parsed (a table never spans a blank line, so
+        // never more than one block).
+        guard text.range(of: "|", options: .literal, range: block.range).location != NSNotFound else { return nil }
+        let source = text.substring(with: block.range)
+        guard delimiterRow.firstMatch(in: source, range: NSRange(location: 0, length: block.range.length)) != nil
+        else { return nil }
+        let mapping = SourceMapping(source)
+        for table in tables(in: Document(parsing: source)) {
+            guard let range = table.range.map({ mapping.range(of: $0, base: 0) }),
+                  let rows = TableRowParsing.rows(ofTableAt: range, in: source as NSString) else { continue }
+            // cmark-gfm starts a row after its indentation; the row's line starts before it.
+            let lines = rows.map { local in
+                let row = NSRange(location: block.range.location + local.location, length: local.length)
+                let line = lineContaining(row.location, in: text)
+                let indentation = NSRange(location: line.location, length: row.location - line.location)
+                return isBlank(indentation, in: text) ? line : NSRange(location: row.location, length: line.upperBound - row.location)
+            }
+            guard lines.contains(where: { NSLocationInRange(location, $0) || location == $0.upperBound }) else { continue }
+            let cells = lines.map { TableRowParsing.cells(in: $0, of: text).cells }
+            guard !cells[0].isEmpty else { return nil }
+            let indents = lines.map { line in
+                String(text.substring(with: line).prefix { $0 == " " || $0 == "\t" })
+            }
+            return TableLayout(lines: lines, cells: cells, indents: indents)
         }
-        // The header and `|---|` rows: the first pair at or above `location`, or just below it.
-        if let next = line(after: here, in: text) { lines.append(next) }
-        guard let delimiter = lines.indices.dropFirst().first(where: {
-            isRowLine(lines[$0], in: text) && isRowLine(lines[$0 - 1], in: text) && isDelimiterRow(lines[$0], in: text)
-        }) else { return nil }
-        lines = Array(lines[(delimiter - 1)...delimiter])
-
-        // The rows: lines with pipes, then whatever cmark-gfm still counts as rows.
-        var plainRows: [NSRange] = []
-        while let next = line(after: plainRows.last ?? lines.last!, in: text), !isBlank(next, in: text),
-              plainRows.count <= maximumPlainRows {
-            if plainRows.isEmpty, isRowLine(next, in: text) { lines.append(next) } else { plainRows.append(next) }
-        }
-        if !plainRows.isEmpty { lines += plainRows.prefix(rowsCountedByGFM(after: lines, of: plainRows, in: text)) }
-
-        guard lines.contains(where: { NSLocationInRange(location, $0) || location == $0.upperBound }) else { return nil }
-        let cells = lines.map { TableRowParsing.cells(in: $0, of: text).cells }
-        guard !cells[0].isEmpty else { return nil }
-        let indents = lines.map { line in
-            String(text.substring(with: line).prefix { $0 == " " || $0 == "\t" })
-        }
-        return TableLayout(lines: lines, cells: cells, indents: indents)
+        return nil
     }
 
-    /// Lines without pipes looked at under a table (or above a row): bounds the
-    /// work when the cursor is in a long paragraph.
-    static let maximumPlainRows = 50
-
-    /// How many of `following` (the lines after `rows`, the first without
-    /// pipes) are rows of the table for cmark-gfm.
-    private static func rowsCountedByGFM(after rows: [NSRange], of following: [NSRange], in text: NSString) -> Int {
-        guard let first = rows.first, let last = following.last else { return 0 }
-        let source = text.substring(with: NSRange(location: first.location, length: last.upperBound - first.location))
-        guard let table = Document(parsing: source).child(at: 0) as? Table,
-              let lastLine = table.range?.upperBound.line else { return 0 }
-        return min(max(lastLine - rows.count, 0), following.count)
+    /// Every table in `markup`, nested ones (in a list item) too.
+    private static func tables(in markup: Markup) -> [Table] {
+        markup.children.flatMap { child in (child as? Table).map { [$0] } ?? tables(in: child) }
     }
 
     /// How column `column` is aligned, from the `|---|` row (`:--`, `:-:`, `--:`).
@@ -150,10 +133,6 @@ public enum TableEditing {
         return true
     }
 
-    private static func isRowLine(_ line: NSRange, in text: NSString) -> Bool {
-        line.length > 0 && !TableRowParsing.cells(in: line, of: text).pipes.isEmpty
-    }
-
     static func isDelimiterRow(_ line: NSRange, in text: NSString) -> Bool {
         delimiterRow.firstMatch(in: text as String, range: line) != nil
     }
@@ -168,16 +147,13 @@ public enum TableEditing {
         let body = "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |"
         // A blank line before and after keeps it apart from the text around it:
         // right under a list item or a quote, it would be part of that instead.
-        func isBlank(_ line: NSRange) -> Bool {
-            text.substring(with: line).allSatisfy { $0 == " " || $0 == "\t" }
-        }
         let before = if location > line.location { "\n\n" }
-            else if line.location > 0, !isBlank(lineContaining(line.location - 1, in: text)) { "\n" }
+            else if line.location > 0, !isBlank(lineContaining(line.location - 1, in: text), in: text) { "\n" }
             else { "" }
         var nextLine = 0
         text.getLineStart(nil, end: &nextLine, contentsEnd: nil, for: line)
         let after = if location < line.upperBound { "\n\n" }
-            else if nextLine < text.length, !isBlank(lineContaining(nextLine, in: text)) { "\n" }
+            else if nextLine < text.length, !isBlank(lineContaining(nextLine, in: text), in: text) { "\n" }
             else { "" }
         let start = location + (before as NSString).length
         return TextEdit(range: NSRange(location: location, length: 0), replacement: before + body + after,

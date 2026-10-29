@@ -154,11 +154,8 @@ extension SpanCollector {
     /// line the columns up, and every row a `.tableRow` span for the grid.
     mutating func visitTable(_ table: Table) {
         defer { descendInto(table) }
-        guard let range = localRange(table) else { return }
-        var lines: [NSRange] = []
-        source.enumerateSubstrings(in: range, options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
-            lines.append(lineRange)
-        }
+        guard let range = localRange(table), let lines = TableRowParsing.rows(ofTableAt: range, in: source),
+              let firstLine = lines.first, let lastLine = lines.last else { return }
         let alignments: [TableAlignment] = table.columnAlignments.map {
             switch $0 {
             case .center: .center
@@ -166,12 +163,6 @@ extension SpanCollector {
             default: .left
             }
         }
-        // Right after a paragraph, cmark-gfm starts the table at the paragraph's
-        // first line; the table really starts on the line before the `|---|` row.
-        guard let delimiter = lines.firstIndex(where: { TableEditing.isDelimiterRow($0, in: source) }),
-              delimiter >= 1 else { return }
-        lines.removeFirst(delimiter - 1)
-        guard let firstLine = lines.first, let lastLine = lines.last else { return }
         let tableRange = NSRange(location: firstLine.location, length: lastLine.upperBound - firstLine.location)
         for (index, line) in lines.enumerated() {
             let (cells, pipes) = TableRowParsing.cells(in: line, of: source)

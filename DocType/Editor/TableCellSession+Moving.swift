@@ -54,6 +54,9 @@ extension TableCellSession {
             case .down: .line(x: caretX, last: false)
             case .tab, .backtab: .all
             }
+            // A row always has cells (cmark-gfm ends a table at a line that's just "|"), but a
+            // wrong index here would crash the app: stay in this cell instead.
+            guard table.cells[targetRow].indices.contains(targetColumn) else { return true }
             begin(cellAt: table.cells[targetRow][targetColumn].location, placing: placement)
         case .leaveAbove:
             leave(table, above: true)

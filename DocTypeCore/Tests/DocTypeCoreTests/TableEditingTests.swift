@@ -48,6 +48,26 @@ struct TableEditingTests {
         #expect(TableEditing.table(at: 6, in: code, blockMap: BlockMap(text: code)) == nil)
         let noDelimiter = "| A | B |\n| 1 | 2 |" as NSString
         #expect(TableEditing.table(at: 3, in: noDelimiter, blockMap: BlockMap(text: noDelimiter)) == nil)
+        // A `|---|` row with fewer cells than the header: GFM draws a paragraph.
+        let mismatched = "| a | b |\n|---|\n| 1 | 2 |" as NSString
+        #expect(TableEditing.table(at: 2, in: mismatched, blockMap: BlockMap(text: mismatched)) == nil)
+    }
+
+    @Test func findsASecondTableAfterAHeadingWithoutBlankLines() {
+        let text = "| a | b |\n|---|---|\n| 1 | 2 |\n# Heading\n| c | d |\n|---|---|\n| 3 | 4 |" as NSString
+        let blocks = BlockMap(text: text)
+        let second = TableEditing.table(at: text.range(of: "3").location, in: text, blockMap: blocks)
+        #expect(second?.lines.first == text.range(of: "| c | d |"))
+        #expect(second?.lines.count == 3)
+        #expect(TableEditing.table(at: text.range(of: "1").location, in: text, blockMap: blocks)?.lines.count == 3)
+        #expect(TableEditing.table(at: text.range(of: "Heading").location, in: text, blockMap: blocks) == nil)
+    }
+
+    @Test func findsATableInAListItemWithItsIndentation() {
+        let text = "- item\n\n  | a |\n  |---|\n  | 1 |" as NSString
+        let table = TableEditing.table(at: text.range(of: "1").location, in: text, blockMap: BlockMap(text: text))
+        #expect(table?.lines.first == text.range(of: "  | a |"))
+        #expect(table?.indents == ["  ", "  ", "  "])
     }
 
     // MARK: Rows and columns
@@ -129,6 +149,16 @@ struct TableEditingTests {
         #expect(target(.up, 2, 1) == .cell(row: 0, column: 1))
         #expect(target(.up, 0, 1) == .leaveAbove)
         #expect(target(.down, 3, 0) == .leaveBelow)
+    }
+
+    /// A line that's just "|" isn't a row: cmark-gfm ends the table there, so
+    /// there's no row without cells to move into.
+    @Test func aLineThatIsJustAPipeEndsTheTable() {
+        let text = "| A | B |\n|---|---|\n| 1 | 2 |\n|" as NSString
+        let table = TableEditing.table(at: 0, in: text, blockMap: BlockMap(text: text))!
+        #expect(table.lines.count == 3)
+        #expect(TableEditing.target(of: .down, fromRow: 2, column: 1, in: table, text: text) == .leaveBelow)
+        #expect(TableEditing.table(at: text.length, in: text, blockMap: BlockMap(text: text)) == nil)
     }
 
     @Test func tabAddsARowAfterTheLastCellAndShiftTabStopsAtTheFirst() {
