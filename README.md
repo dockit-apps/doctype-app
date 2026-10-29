@@ -1,4 +1,12 @@
-# DocType
+<p align="center">
+  <img src="docs/images/doctype-icon.png" width="128" height="128" alt="DocType app icon">
+</p>
+
+<h1 align="center">DocType</h1>
+
+<p align="center">
+  <a href="https://github.com/dockit-apps/doctype-app/releases">Download</a> · macOS 26 or later
+</p>
 
 A native macOS Markdown note app. Notes are plain `.md` files in a folder you choose: notebooks are subfolders, tags live in YAML frontmatter, and changes made outside the app (git, other editors, scripts) show up automatically. Nothing is stored anywhere else, so your notes stay readable on GitHub, in other editors and in any tool that reads Markdown.
 
