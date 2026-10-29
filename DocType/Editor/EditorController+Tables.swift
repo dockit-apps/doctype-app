@@ -23,8 +23,9 @@ extension EditorController {
         let target = location ?? tableCells.cellLocation ?? textView.selectedRange().location
         let wasEditing = tableCells.isEditing
         tableCells.commit()
-        guard let edit = TableEditing.edit(operation, at: target, in: text, blockMap: styler.blockMap) else {
-            NSSound.beep()  // e.g. deleting the header row or the last column
+        guard let edit = TableEditing.edit(operation, at: target, in: text, blockMap: styler.blockMap,
+                                           maximumColumns: EditorTheme.maximumTableColumns) else {
+            NSSound.beep()  // e.g. deleting the header row or the last column, or a ninth column
             if wasEditing { tableCells.begin(cellAt: target, placing: .end) }
             return
         }
@@ -64,10 +65,17 @@ extension EditorController {
         return TableEditing.table(at: location, in: text, blockMap: styler.blockMap) != nil
     }
 
-    /// Keeps `isInTable` (which enables the table commands) up to date.
+    /// Keeps `isInTable` and `canAddTableColumn` (which enable the table
+    /// commands) up to date.
     func updateIsInTable() {
-        let inTable = tableCells.isEditing || isInTable(at: textView.selectedRange().location)
+        let table = textView.textStorage.flatMap { storage in
+            TableEditing.table(at: tableCells.cellLocation ?? textView.selectedRange().location,
+                               in: storage.mutableString, blockMap: styler.blockMap)
+        }
+        let inTable = tableCells.isEditing || table != nil
         if inTable != isInTable { isInTable = inTable }
+        let canAdd = (table?.columnCount ?? 0) < EditorTheme.maximumTableColumns
+        if canAdd != canAddTableColumn { canAddTableColumn = canAdd }
     }
 
     /// The note's cursor never stays in a table's hidden markdown: arriving

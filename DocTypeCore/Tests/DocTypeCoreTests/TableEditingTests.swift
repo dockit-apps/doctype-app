@@ -27,9 +27,10 @@ struct TableEditingTests {
         return closed.replacingCharacters(in: NSRange(location: after.location, length: 0), with: "[[")
     }
 
-    private func run(_ operation: TableOperation, _ marked: String) -> String? {
+    private func run(_ operation: TableOperation, _ marked: String, maximumColumns: Int = .max) -> String? {
         let (text, selection) = parse(marked)
-        return show(TableEditing.edit(operation, at: selection.location, in: text, blockMap: BlockMap(text: text)), on: text)
+        return show(TableEditing.edit(operation, at: selection.location, in: text, blockMap: BlockMap(text: text),
+                                      maximumColumns: maximumColumns), on: text)
     }
 
     private let table = "intro\n\n| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\nafter"
@@ -60,6 +61,15 @@ struct TableEditingTests {
     @Test func addingColumnsKeepsCellsAndIndentation() {
         #expect(run(.addColumnRight, "| A | B |\n|---|:-:|\n| 1^ | 2 |") == "| A |  | B |\n|---| --- |:-:|\n| 1 | ^ | 2 |")
         #expect(run(.addColumnLeft, "  a | b\n  --|--\n  ^1 | 2") == "  |  |a | b|\n  | --- |--|--|\n  | ^ |1 | 2|")
+    }
+
+    @Test func columnsStopAtTheMaximum() {
+        let full = "| A | B | C |\n|---|---|---|\n| 1^ | 2 | 3 |"
+        #expect(run(.addColumnRight, full, maximumColumns: 3) == nil)
+        #expect(run(.addColumnLeft, full, maximumColumns: 3) == nil)
+        #expect(run(.addColumnRight, full, maximumColumns: 4) != nil)
+        #expect(run(.addRowBelow, full, maximumColumns: 3) != nil)  // rows aren't limited
+        #expect(run(.deleteColumn, full, maximumColumns: 2) == "| B | C |\n|---|---|\n| ^2 | 3 |")  // nor making it narrower
     }
 
     @Test func deletingRowsAndColumns() {

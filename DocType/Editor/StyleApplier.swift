@@ -31,7 +31,7 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     var imageContext: ImageContext?
     /// The table cell being edited (see TableCellSession); tables take their
     /// width from the editor.
-    var editingTableCell: (location: Int, height: CGFloat)?
+    var editingTableCell: TableContext.EditingCell?
     /// Called with images found while styling `range` that need measuring first;
     /// restyle the range once they are.
     var onUnmeasuredImages: (_ urls: [URL], _ range: NSRange) -> Void = { _, _ in }
@@ -48,6 +48,9 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
     /// How wide tables may get, and the cell being edited.
     private var currentTableContext: TableContext {
         var context = TableContext(editingCell: editingTableCell)
+        if let textView, let window = textView.window {
+            context.isSelectionActive = window.isKeyWindow && window.firstResponder === textView
+        }
         if let container = textView?.textContainer, container.size.width > 100 {
             context.width = container.size.width - 2 * container.lineFragmentPadding
         }
@@ -128,7 +131,10 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
         let previous = styledSelection
         let text = storage.mutableString
         let clampedPrevious = Self.clamp(previous, toLength: text.length)
-        guard text.paragraphRange(for: clampedPrevious) != text.paragraphRange(for: selection) else {
+        // A table draws the selection in its cells, so it changes with any move there.
+        let changesTable = selection != clampedPrevious
+            && [clampedPrevious, selection].contains { $0.length > 0 && Self.touchesTable($0, in: storage) }
+        guard changesTable || text.paragraphRange(for: clampedPrevious) != text.paragraphRange(for: selection) else {
             styledSelection = selection
             return
         }
@@ -140,6 +146,21 @@ final class StyleApplier: NSObject, NSTextStorageDelegate {
             return
         }
         restyleBlocks(touching: [clampedPrevious, selection], in: storage)
+    }
+
+    /// Redraws the selection in tables in the right color after the note
+    /// gained or lost the keyboard (TableContext.isSelectionActive).
+    func selectionFocusDidChange(in storage: NSTextStorage) {
+        guard let selection = textView?.selectedRange(), selection.length > 0,
+              Self.touchesTable(Self.clamp(selection, toLength: storage.length), in: storage) else { return }
+        restyle([selection], in: storage)
+    }
+
+    /// Either end of `range` is on a table row.
+    private static func touchesTable(_ range: NSRange, in storage: NSTextStorage) -> Bool {
+        [range.location, NSMaxRange(range)].contains { location in
+            location < storage.length && storage.attribute(EditorTheme.tableRowKey, at: location, effectiveRange: nil) != nil
+        }
     }
 
     /// Restyles the blocks overlapping `ranges` as one attribute-only edit.

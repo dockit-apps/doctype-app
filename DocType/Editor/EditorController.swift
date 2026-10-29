@@ -23,6 +23,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     private(set) var hasFocus = false
     /// The cursor is in a table (enables the table commands).
     var isInTable = false
+    /// The table the cursor is in can get another column (see EditorTheme.maximumTableColumns).
+    var canAddTableColumn = true
     /// A table cell is being edited (TableCellSession); line formats are off there.
     var isEditingTableCell = false
     /// The open note isn't UTF-8 text: it's shown but never changed or saved
@@ -66,6 +68,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.onFocusChange = { [weak self] focused in
             self?.textViewHasFocus = focused
             self?.updateFocus()
+            self?.selectionFocusDidChange()
         }
         textView.onTaskBoxClick = { [weak self] in self?.toggleTask(at: $0) }
         textView.onLinkClick = { [weak self] in self?.onOpenLink($0) }
@@ -78,6 +81,24 @@ final class EditorController: NSObject, NSTextViewDelegate {
         }
         for name: Notification.Name in [.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
             center.addObserver(self, selector: #selector(noteDidUndoOrRedo(_:)), name: name, object: nil)
+        }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            center.addObserver(self, selector: #selector(windowKeyDidChange(_:)), name: name, object: nil)
+        }
+    }
+
+    @objc private func windowKeyDidChange(_ notification: Notification) {
+        guard notification.object as? NSWindow === textView.window else { return }
+        selectionFocusDidChange()
+    }
+
+    /// A selection in a table is drawn by the table, in a color that depends on
+    /// focus. Once the focus change is done: the window's first responder
+    /// changes after the view is told.
+    private func selectionFocusDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let storage = self.textView.textStorage else { return }
+            self.styler.selectionFocusDidChange(in: storage)
         }
     }
 

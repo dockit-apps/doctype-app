@@ -74,7 +74,7 @@ extension MarkdownTextView {
     /// location. Restyling a table drops its rows' layout, and a row laid out on
     /// its own is placed by an estimate (a line off, after a row grew): the
     /// viewport's layout, which drawing uses, places it after the text above.
-    private func layOutTable(through location: Int) -> NSTextLocation? {
+    func layOutTable(through location: Int) -> NSTextLocation? {
         guard let layout = textLayoutManager, let storage = textStorage, location <= storage.length,
               let target = layout.location(layout.documentRange.location, offsetBy: location) else { return nil }
         let viewport = layout.textViewportLayoutController
@@ -94,7 +94,7 @@ extension MarkdownTextView {
     }
 
     /// A layout fragment's origin in view coordinates.
-    private func fragmentOrigin(_ fragment: NSTextLayoutFragment) -> CGPoint {
+    func fragmentOrigin(_ fragment: NSTextLayoutFragment) -> CGPoint {
         let container = textContainerOrigin
         return CGPoint(x: container.x + fragment.layoutFragmentFrame.minX, y: container.y + fragment.layoutFragmentFrame.minY)
     }
@@ -119,6 +119,17 @@ extension MarkdownTextView {
             item.representedObject = TableMenuAction(operation: operation, location: location)
             menu.insertItem(item, at: index)
         }
+    }
+
+    /// "Add Column" is off in a table that has all the columns it can get.
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == #selector(runTableMenuItem(_:)) else { return super.validateMenuItem(item) }
+        guard let action = item.representedObject as? TableMenuAction,
+              action.operation == .addColumnLeft || action.operation == .addColumnRight,
+              let storage = textStorage, action.location < storage.length,
+              let row = storage.attribute(EditorTheme.tableRowKey, at: action.location, effectiveRange: nil) as? TableRowLayout
+        else { return true }
+        return row.canAddColumn
     }
 
     @objc private func runTableMenuItem(_ item: NSMenuItem) {

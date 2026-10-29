@@ -1,5 +1,5 @@
-// Drawing a table row: its grid lines, the shaded header, each cell's wrapped
-// text, and the "+" buttons that add a row or column. The layout comes from
+// Drawing a table row: its grid lines, the shaded header, the note's selection,
+// each cell's wrapped text, and the "+" buttons that add a row or column. The layout comes from
 // EditorTheme+Tables; see BlockDecorations.
 
 import AppKit
@@ -14,13 +14,14 @@ nonisolated extension DecoratedLayoutFragment {
     var tableRow: TableRowLayout? { decorations.tableRow }
 
     /// The table's "+" buttons on this row (fragment coordinates): "add column"
-    /// right of the header, "add row" under the last row. Only while the cursor is in the table.
+    /// right of the header (unless the table has all the columns it can get),
+    /// "add row" under the last row. Only while the cursor is in the table.
     var tableButtons: [(button: TableButton, frame: CGRect)] {
         guard let row = decorations.tableRow, row.isActive, row.index == 0 || row.isLast,
               let left = row.columnLines.first, let right = row.columnLines.last else { return [] }
         let size: CGFloat = 16
         var buttons: [(TableButton, CGRect)] = []
-        if row.index == 0 {
+        if row.index == 0, row.canAddColumn {
             buttons.append((.addColumn, CGRect(x: right + 6, y: (row.height - size) / 2, width: size, height: size)))
         }
         if row.isLast {
@@ -37,6 +38,11 @@ nonisolated extension DecoratedLayoutFragment {
         if row.index == 0 {
             context.setFillColor(Self.tableHeaderFill.cgColor)
             context.fill(CGRect(x: point.x + left, y: top, width: right - left, height: bottom - top))
+        }
+        if !row.selection.isEmpty {
+            let color: NSColor = row.isSelectionActive ? .selectedTextBackgroundColor : .unemphasizedSelectedTextBackgroundColor
+            context.setFillColor(color.cgColor)
+            context.fill(row.selection.map { $0.offsetBy(dx: point.x, dy: point.y) })
         }
         context.setStrokeColor(Self.tableLine.cgColor)
         context.setLineWidth(1)

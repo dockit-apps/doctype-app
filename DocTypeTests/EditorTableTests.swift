@@ -1,7 +1,9 @@
 // Tables in a real editor: drawn as a grid (wrapped cells, `<br>` as a line
-// break, rows as tall as their tallest cell), and edited one cell at a time in
-// the cell editor: typing, Shift-Return, the arrow keys, Tab and Return, undo
-// (one history with the note's), the "+" buttons and the context menu.
+// break, rows as tall as their tallest cell, never wider than the text), with
+// the note's selection and Find's matches shown in the cells, and edited one
+// cell at a time in the cell editor: typing, Shift-Return, the arrow keys, Tab
+// and Return, undo (one history with the note's), the "+" buttons and the
+// context menu.
 
 import AppKit
 import DocTypeCore
@@ -114,6 +116,133 @@ struct EditorTableTests {
         let table = try #require(row.columnLines.last)
         #expect(table <= 400)  // fits the editor instead of running past it
         #expect(row.height > 3 * EditorTheme.emptyCellHeight)  // the long cell wrapped
+    }
+
+    @Test func tablesFitTheTextAndStopGettingColumnsAtTheMost() async throws {
+        let wide = (1...12).map(String.init)
+        let header = "| " + wide.joined(separator: " | ") + " |"
+        let delimiter = "|" + String(repeating: " --- |", count: 12)
+        let body = "| " + ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+                           "lambda", "mu"].joined(separator: " | ") + " |"
+        let most = EditorTheme.maximumTableColumns
+        let full = (1...most).map { "c\($0)" }
+        let text = [header, delimiter, body, "", "| " + full.joined(separator: " | ") + " |",
+                    "|" + String(repeating: " --- |", count: most), "", "end"].joined(separator: "\n")
+        let (editor, folder, _) = try await editor(showing: text, width: 1400)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let container = try #require(textView.textContainer)
+        let textWidth = container.size.width - 2 * container.lineFragmentPadding
+
+        // Twelve columns written elsewhere fit the text column of a wide window.
+        let wideRow = try #require(row(containing: "alpha", in: editor))
+        #expect(try #require(wideRow.columnLines.last) <= textWidth)
+        #expect(wideRow.cells.allSatisfy { $0.frame.maxX <= textWidth })
+        #expect(!wideRow.canAddColumn)
+
+        // A full table gets no more: the "+" and the commands are off, and adding refuses.
+        #expect(most >= 6)
+        #expect(editor.tableCells.begin(cellAt: cell("c1", in: editor), placing: .end))
+        #expect(!editor.canAddTableColumn)
+        #expect(row(containing: "c1", in: editor)?.canAddColumn == false)
+        editor.performTableOperation(.addColumnRight)
+        #expect(textView.string == text)
+        let menu = NSMenu()
+        (textView as! MarkdownTextView).addTableItems(to: menu, location: cell("c1", in: editor))
+        let addColumn = try #require(menu.items.first { $0.title == "Add Column Right" })
+        let addRow = try #require(menu.items.first { $0.title == "Add Row Below" })
+        #expect(!textView.validateMenuItem(addColumn) && textView.validateMenuItem(addRow))
+        editor.performTableOperation(.deleteColumn)
+        #expect(editor.canAddTableColumn)  // one fewer: room for one again
+        editor.performTableOperation(.addColumnRight)
+        #expect(!editor.canAddTableColumn)
+    }
+
+    @Test func aSelectionThroughATableIsDrawnInTheCellsItCovers() async throws {
+        let text = "before\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | needle |\n\nafter"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let string = textView.string as NSString
+
+        // From the text into the table: whole cells, up to the one it ends in.
+        textView.setSelectedRange(NSRange(location: 0, length: string.range(of: "1 |").location + 1))
+        layOut(textView)
+        #expect(row(containing: "| A", in: editor)?.selection.count == 2)
+        #expect(row(containing: "| 1", in: editor)?.selection.count == 1)
+        #expect(row(containing: "| 3", in: editor)?.selection.isEmpty == true)
+        #expect(!editor.tableCells.isEditing)  // a selection reaching past a cell stays in the note
+
+        // Inside one cell, with the keyboard elsewhere (a match Find selected):
+        // the selected text, in gray.
+        window.makeFirstResponder(nil)
+        let needle = string.range(of: "needle")
+        textView.setSelectedRange(NSRange(location: needle.location + 2, length: 3))
+        layOut(textView)
+        let last = try #require(row(containing: "needle", in: editor))
+        let cellFrame = try #require(last.cells.last?.frame)
+        let selected = try #require(last.selection.first)
+        #expect(last.selection.count == 1 && !last.isSelectionActive)
+        #expect(cellFrame.contains(CGPoint(x: selected.midX, y: selected.midY)))
+        #expect(selected.minX > cellFrame.minX + 5 && selected.width < cellFrame.width / 2)  // "edl", not the cell
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        layOut(textView)
+        #expect(row(containing: "needle", in: editor)?.selection.isEmpty == true)
+    }
+
+    @Test func findShowsAndDrawsMatchesInCells() async throws {
+        let text = "a needle\n\n| A | B |\n| --- | --- |\n| x | the needle |\n\nend"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView as! MarkdownTextView
+        window.makeFirstResponder(nil)
+        let string = textView.string as NSString
+        let inCell = string.range(of: "needle", options: .backwards)
+
+        // Where the find bar highlights it: on the word as the cell draws it.
+        let rects = try #require(textView.findRects(forCharacterRange: inCell)).map(\.rectValue)
+        let cellFrame = try #require(textView.tableCellTextFrame(at: cell("the needle", in: editor))).frame
+        let word = ("needle" as NSString).size(withAttributes: [.font: EditorTheme.bodyFont]).width
+        #expect(rects.count == 1)
+        #expect(cellFrame.insetBy(dx: -1, dy: -1).contains(rects[0]))
+        #expect(abs(rects[0].width - word) < 2 && rects[0].minX > cellFrame.minX + 10)
+        // Outside tables, NSTextView's own answer.
+        #expect(textView.findRects(forCharacterRange: string.range(of: "needle"))?.isEmpty == false)
+
+        // It draws the word there, and nothing else.
+        let size = textView.bounds.size
+        let bitmap = try #require(CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8,
+                                            bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        bitmap.translateBy(x: 0, y: size.height)
+        bitmap.scaleBy(x: 1, y: -1)  // like the view: y down, row 0 at the top
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: bitmap, flipped: true)
+        textView.findDrawCharacters(in: inCell, forContentView: textView)
+        NSGraphicsContext.restoreGraphicsState()
+        let pixels = try #require(bitmap.data).assumingMemoryBound(to: UInt8.self)
+        func isDrawn(_ x: Int, _ y: Int) -> Bool { pixels[y * bitmap.bytesPerRow + x * 4 + 3] > 0 }
+        let match = rects[0].integral
+        let drawn = (Int(match.minX)..<Int(match.maxX)).contains { x in (Int(match.minY)..<Int(match.maxY)).contains { isDrawn(x, $0) } }
+        let outside = (0..<Int(size.width)).contains { x in (0..<Int(size.height)).contains { y in
+            isDrawn(x, y) && !match.insetBy(dx: -1, dy: -1).contains(CGPoint(x: x, y: y)) } }
+        #expect(drawn && !outside)
+    }
+
+    @Test func markersShownInAnEditedCellWidenItsColumnInsteadOfWrapping() async throws {
+        let text = "| A | B |\n| --- | --- |\n| **x** | y |\n\nend"
+        let (editor, folder, _) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let drawn = try #require(row(containing: "**x**", in: editor)?.cells.first?.frame.width)
+
+        #expect(editor.tableCells.begin(cellAt: cell("**x**", in: editor), placing: .end))
+        let cellEditor = editor.tableCells.editor
+        #expect(cellEditor.unwrappedTextWidth > drawn)  // the ** take room the drawn cell doesn't have
+        #expect(cellEditor.frame.width >= cellEditor.unwrappedTextWidth)
+        #expect(cellEditor.textHeight == EditorTheme.emptyCellHeight)  // one line
+        editor.tableCells.end(placingCursorAt: nil)
+        layOut(editor.textView)
+        #expect(row(containing: "**x**", in: editor)?.cells.first?.frame.width == drawn)  // and back
     }
 
     // MARK: Typing in a cell

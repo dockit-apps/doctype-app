@@ -61,6 +61,9 @@ One `NSTextView` on TextKit 2 (`MarkdownTextView`) shows the note's body. The fr
 - **Decorations.** `BlockDecorations` returns a custom layout fragment for each paragraph that needs drawing: code boxes, quote bars, rules, bullets, checkboxes, images and table rows.
 - **Images** are measured from file headers before a note appears. Their thumbnails are decoded downsampled off the main thread into a 64 MB cache (`ImageStore`). Width is stored as `![alt|300](path)`.
 - **Tables.** A table's Markdown stays in the note, hidden. `EditorTheme+Tables` lays out each row: wrapped cells, `<br>` as a line break, every row as tall as its tallest cell. `BlockDecorations+Tables` draws the rows. The cell being edited gets a real text view laid over it (`TableCellSession`, `TableCellEditor`), and every keystroke there is written straight into the note (`TableCellText` maps `<br>` and `\|` both ways). The note's own cursor never stays in a table: arriving there opens the cell.
+  - *Width.* A table never runs past the text column. A table a little too wide tightens its cell padding before any column wraps. A table gets at most `EditorTheme.maximumTableColumns` columns (eight, as many as fit the text column at a readable width). After that, Add Column is disabled and the "+" button is hidden. A wider table written elsewhere still opens and fits, with narrower columns.
+  - *Selection and Find.* Since the Markdown under a table is hidden, the table draws the note's selection itself: whole cells when it reaches past one cell, the selected text when it's inside one. Find's highlights come from the cells' layout too (`MarkdownTextView+Find` answers the find bar's `rectsForCharacterRange:` and `drawCharactersInRange:forContentView:` for matches in tables).
+  - *Markers.* Drawn cells always hide `**` and other markers; the cell editor shows them on the cursor's line, and the column widens to fit them instead of wrapping.
 - **Read-only notes.** A file that isn't UTF-8 is decoded anyway (`NoteText`), shown, and never saved, so its encoding is never changed.
 
 ## Undo
@@ -108,9 +111,7 @@ Other measurements:
 
 ## Known limitations
 
-- Find (⌘F) finds and replaces text in tables, but its match highlights don't show inside a table.
-- A mouse selection dragged from the text through a table isn't highlighted inside the table. Copying it still copies the Markdown.
-- In a narrow column, showing a cell's `**` markers on the cursor's line can wrap that line, so the row grows while you edit it.
+- A selection that covers whole table rows is also drawn by NSTextView to the right of the table, as for any selected line break.
 - Bare URLs are links in the editor, through DocType's own detector (`BareURL`), because swift-markdown has no GFM autolink extension.
 - One app test, `thumbnailsAreDecodedSmall`, failed now and then in earlier runs (waiting for a thumbnail). It passed all 50 repeated runs in the last audit. The cause wasn't found.
 
@@ -121,6 +122,7 @@ Other measurements:
 - **Objective-C exceptions.** They crash at once (`NSApplicationCrashOnExceptions`) instead of leaving Swift concurrency in a broken state.
 - **Undo groups in tests.** In app tests, the run loop may not end an undo group between "key presses" while other tests run. Tests that check undo steps group them by hand (`EditorTableTests.groupUndoByHand`).
 - **Key modifiers.** `NSApp.currentEvent` can be an older event. The table cell editor reads modifier keys from the key press it is handling.
+- **Find in hidden text.** NSTextView's find bar places its highlights from the text's own layout, which for a table is hidden. NSTextView doesn't declare its find-bar client methods, so `MarkdownTextView+Find` overrides them by selector and calls NSTextView's own through their implementation.
 - **`log` in zsh.** In zsh, `log` is a shell builtin. Use `/usr/bin/log show` to read the app's log.
 
 ## Planned extension points

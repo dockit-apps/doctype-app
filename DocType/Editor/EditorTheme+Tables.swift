@@ -11,6 +11,22 @@
 // stays beside it, and a cell can't wrap within its column. (Tried: hidden text
 // with stretched pipes, and line fragments placed by hand, which TextKit 2
 // ignores for the cursor and clicks.)
+//
+// Width: a table never runs past the text column. Columns keep their natural
+// width while they fit. A table a little too wide tightens its cell padding
+// first (down to `minimumCellPadding`), so short words don't break; then the
+// wide columns wrap, and a crowded one (many columns from elsewhere, or a
+// narrow window) gives up padding before going wider. Adding columns stops at `maximumTableColumns`, as many as fit
+// the full text column at a readable width (TableEditing refuses more), so a
+// table made here never needs squeezing. Alternatives considered: scrolling
+// a wide table sideways (Notion, GitHub), which would need its own scrolling,
+// hit-testing and cell editor placement inside the note's text view; and
+// letting tables use the window's full width, which breaks the text column
+// and still has no limit.
+//
+// Selection: the note's selection is drawn in the cells it covers, since the
+// markdown under them is hidden: whole cells when it reaches past one, or the
+// selected text when it's inside one cell (a match Find selected).
 
 import AppKit
 import DocTypeCore
@@ -19,9 +35,22 @@ import DocTypeCore
 struct TableContext {
     /// How wide a table may get: the text container's width, without padding.
     var width: CGFloat = 600
-    /// The cell being edited: where it starts (after its opening pipe) and the
-    /// height its editor needs.
-    var editingCell: (location: Int, height: CGFloat)?
+    var editingCell: EditingCell?
+    /// The note has the keyboard in the key window: its selection is drawn in
+    /// the accent color, otherwise in gray (as NSTextView draws it).
+    var isSelectionActive = true
+
+    /// The cell being edited, as its editor shows it.
+    struct EditingCell: Equatable {
+        /// Where it starts (after its opening pipe).
+        var location: Int
+        /// The height its editor needs.
+        var height: CGFloat
+        /// How wide its text is unwrapped, with the markdown markers the editor
+        /// shows on the cursor's line: its column is at least that wide, so
+        /// showing them doesn't wrap the line.
+        var width: CGFloat
+    }
 }
 
 /// A table row as drawn, stored on the row's line. Positions are in the row's
@@ -30,6 +59,9 @@ nonisolated struct TableRowLayout: Hashable, @unchecked Sendable {
     struct Cell: Hashable, @unchecked Sendable {
         /// The cell between its pipes, relative to the start of the row's line.
         let range: NSRange
+        /// Its text without the spaces around it (what `text` shows), relative
+        /// to the start of the row's line.
+        let content: NSRange
         let text: NSAttributedString
         /// Where its text is drawn, wrapped to this width.
         let frame: CGRect
@@ -41,56 +73,21 @@ nonisolated struct TableRowLayout: Hashable, @unchecked Sendable {
     let isLast: Bool
     /// The cursor is in the table: its "+" buttons show.
     let isActive: Bool
+    /// The table has fewer than `maximumTableColumns`: "add column" shows.
+    let canAddColumn: Bool
     /// Where the vertical grid lines go, left to right.
     let columnLines: [CGFloat]
     let height: CGFloat
     let cells: [Cell]
+    /// The note's selection in this row: where it's drawn, and in which color.
+    let selection: [CGRect]
+    let isSelectionActive: Bool
 
     /// The `|---|` row: hidden, it only continues the grid lines.
     var isDelimiter: Bool { index == 1 }
 }
 
 extension EditorTheme {
-    /// Space between a cell's text and the grid lines beside it.
-    static let tableCellPadding: CGFloat = 8
-    /// Room above and below a cell's text.
-    nonisolated static let tableRowPadding: CGFloat = 6
-    /// Narrowest column, so an empty one is still easy to click; and narrowest a
-    /// column gets when long text is wrapped to fit the editor.
-    static let minimumColumnWidth: CGFloat = 24
-    static let minimumWrappedColumnWidth: CGFloat = 64
-    /// A table's hidden markdown: far smaller than other hidden syntax, as a
-    /// long row's tiny widths would add up.
-    static let hiddenTableAttributes: [NSAttributedString.Key: Any] = [
-        .font: NSFont.systemFont(ofSize: 0.001),
-        .foregroundColor: NSColor.clear,
-    ]
-
-    /// A cell's text as it's drawn and edited: body text and line spacing,
-    /// aligned like its column.
-    static func cellParagraphStyle(_ alignment: TableAlignment) -> NSParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = tableLineSpacing
-        style.alignment = switch alignment {
-        case .left: .left
-        case .center: .center
-        case .right: .right
-        }
-        return style
-    }
-
-    /// The height of a cell's text wrapped to `width`; an empty cell has one line's.
-    static func cellTextHeight(_ text: NSAttributedString, width: CGFloat) -> CGFloat {
-        let measured = text.length == 0 ? emptyCellHeight : text.boundingRect(
-            with: CGSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]).height
-        return max(measured, emptyCellHeight).rounded(.up)
-    }
-
-    static let emptyCellHeight: CGFloat = NSAttributedString(
-        string: " ", attributes: [.font: bodyFont, .paragraphStyle: cellParagraphStyle(.left)]
-    ).boundingRect(with: CGSize(width: 1000, height: 1000), options: [.usesLineFragmentOrigin, .usesFontLeading]).height
-
     /// Lays out every table among `spans` (see the top of this file).
     static func layOutTables(_ spans: [StyleSpan], in text: NSMutableAttributedString, selection: NSRange,
                              context: TableContext?) {
@@ -161,15 +158,28 @@ extension EditorTheme {
             }
             shown.append(texts)
         }
+        let edited = context.editingCell.flatMap { editing in
+            rows.lazy.flatMap(\.cells).first { $0.range.location == editing.location }.map { (editing, $0.column) }
+        }
+        if let (cell, column) = edited { natural[column] = max(natural[column] ?? minimumColumnWidth, cell.width) }
         let columnCount = max((natural.keys.max() ?? 0) + 1, 1)
         let naturalWidths = (0..<columnCount).map { natural[$0] ?? minimumColumnWidth }
-        let available = context.width - CGFloat(columnCount) * 2 * tableCellPadding - 1
-        let widths = fitColumns(naturalWidths, into: available)
+        let room = context.width - 1
+        // The padding that fits every column unwrapped, if it isn't too tight;
+        // else what a column of `minimumColumnWidth` leaves.
+        let unwrapped = ((room - naturalWidths.reduce(0, +)) / CGFloat(2 * columnCount)).rounded(.down)
+        let crowded = ((room / CGFloat(columnCount) - minimumColumnWidth) / 2).rounded(.down)
+        let padding = min(tableCellPadding, max(minimumCellPadding, unwrapped >= minimumCellPadding ? unwrapped : crowded))
+        let widths = fitColumns(naturalWidths, into: room - CGFloat(columnCount) * 2 * padding)
         var columnLines: [CGFloat] = [0]
-        for width in widths { columnLines.append(columnLines[columnLines.count - 1] + width + 2 * tableCellPadding) }
+        for width in widths { columnLines.append(columnLines[columnLines.count - 1] + width + 2 * padding) }
 
-        let isActive = context.editingCell.map { NSLocationInRange($0.location, tableRange) } == true
+        let isActive = edited != nil
             || (selection.location <= NSMaxRange(tableRange) && NSMaxRange(selection) >= tableRange.location)
+        // A selection inside one cell's text shows as text; one reaching further, as whole cells.
+        let selectedCell = selection.length == 0 ? nil : rows.lazy.flatMap(\.cells).first {
+            selection.location >= $0.range.location && NSMaxRange(selection) <= NSMaxRange($0.range)
+        }
         for (row, texts) in zip(rows, shown) {
             let line = string.paragraphRange(for: NSRange(location: row.line.location, length: 0))
             text.addAttributes(hiddenTableAttributes, range: line)
@@ -180,16 +190,32 @@ extension EditorTheme {
                 heights.append(editing ?? cellTextHeight(cellText, width: width))
             }
             let contentHeight = max(heights.max() ?? 0, emptyCellHeight)
+            let height = row.isDelimiter ? 1 : (contentHeight + 2 * tableRowPadding).rounded(.up)
             var cells: [TableRowLayout.Cell] = []
+            var selected: [CGRect] = []
             for (cell, cellText) in zip(row.cells, texts) {
                 let column = min(cell.column, columnCount - 1)
-                let frame = CGRect(x: columnLines[column] + tableCellPadding, y: tableRowPadding,
+                let frame = CGRect(x: columnLines[column] + padding, y: tableRowPadding,
                                    width: widths[column], height: contentHeight)
+                let content = TableEditing.contentRange(of: cell.range, in: string)
+                let isEditing = context.editingCell?.location == cell.range.location
                 cells.append(TableRowLayout.Cell(
                     range: NSRange(location: cell.range.location - line.location, length: cell.range.length),
-                    text: cellText, frame: frame, isEditing: context.editingCell?.location == cell.range.location))
+                    content: NSRange(location: content.location - line.location, length: content.length),
+                    text: cellText, frame: frame, isEditing: isEditing))
+                if isEditing || selection.length == 0 { continue }  // the cell editor shows its own
+                if let selectedCell {
+                    guard selectedCell.range == cell.range else { continue }
+                    let inCell = NSIntersectionRange(selection, content)
+                    let shownRange = TableCellText(markdown: string.substring(with: content)).editorRange(
+                        forMarkdownRange: NSRange(location: inCell.location - content.location, length: inCell.length))
+                    selected += cellTextRects(cellText, width: frame.width, range: shownRange)
+                        .map { $0.offsetBy(dx: frame.minX, dy: frame.minY) }
+                } else if NSIntersectionRange(selection, cell.range).length > 0 {
+                    selected.append(CGRect(x: columnLines[column], y: 0,
+                                           width: columnLines[column + 1] - columnLines[column], height: height))
+                }
             }
-            let height = row.isDelimiter ? 1 : (contentHeight + 2 * tableRowPadding).rounded(.up)
             let style = NSMutableParagraphStyle()
             style.minimumLineHeight = height
             style.maximumLineHeight = height
@@ -197,7 +223,9 @@ extension EditorTheme {
             text.addAttributes([
                 .paragraphStyle: style,
                 tableRowKey: TableRowLayout(index: row.index, isLast: row.isLast, isActive: isActive,
-                                            columnLines: columnLines, height: height, cells: cells),
+                                            canAddColumn: columnCount < maximumTableColumns,
+                                            columnLines: columnLines, height: height, cells: cells, selection: selected,
+                                            isSelectionActive: context.isSelectionActive),
             ], range: line)
         }
     }
@@ -220,27 +248,5 @@ extension EditorTheme {
         }
         shown.addAttribute(.paragraphStyle, value: cellParagraphStyle(alignment), range: NSRange(location: 0, length: shown.length))
         return shown
-    }
-
-    /// Column widths that fit `available`: columns narrower than an equal share
-    /// keep their width, the others share the rest and wrap their text.
-    static func fitColumns(_ natural: [CGFloat], into available: CGFloat) -> [CGFloat] {
-        guard natural.reduce(0, +) > available, !natural.isEmpty else { return natural }
-        var widths = natural
-        var remaining = available
-        var open = Array(natural.indices)
-        while !open.isEmpty {
-            let share = remaining / CGFloat(open.count)
-            let narrow = open.filter { natural[$0] <= share }
-            guard !narrow.isEmpty else {
-                for index in open { widths[index] = share.rounded(.down) }
-                break
-            }
-            for index in narrow { remaining -= natural[index] }
-            open.removeAll { narrow.contains($0) }
-        }
-        return widths.enumerated().map { index, width in
-            width < natural[index] ? max(width, minimumWrappedColumnWidth) : width
-        }
     }
 }

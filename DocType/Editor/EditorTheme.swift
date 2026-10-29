@@ -55,6 +55,20 @@ enum EditorTheme {
                       selection: NSRange, images: ImageContext? = nil, tables: TableContext? = nil) -> [URL] {
         text.setAttributes(baseAttributes, range: range)
         var unmeasuredImages: [URL] = []
+        // Table cells are drawn from their text with the markers hidden even
+        // where selected: they're edited in the cell editor, which shows them.
+        let tableLines = spans.compactMap { span -> NSRange? in
+            if case .tableRow = span.style { span.range } else { nil }
+        }.sorted { $0.location < $1.location }
+        let isInTable = { (marker: NSRange) -> Bool in
+            // The last line starting at or before the marker (binary search: a table can have many rows).
+            var low = 0, high = tableLines.count
+            while low < high {
+                let middle = (low + high) / 2
+                if tableLines[middle].location <= marker.location { low = middle + 1 } else { high = middle }
+            }
+            return low > 0 && NSLocationInRange(marker.location, tableLines[low - 1])
+        }
         for span in spans where !span.isHeldBack(by: selection) {
             switch span.style {
             case .tableRow, .tableCell, .tablePipe:
@@ -71,7 +85,7 @@ enum EditorTheme {
                 }
             case .horizontalRule:
                 applyToLines(span.range, of: text) { _ in [.paragraphStyle: ruleParagraphStyle, ruleLineKey: true] }
-            case .syntaxMarker where !span.isRevealed(by: selection), .hiddenMarker:
+            case .syntaxMarker where !span.isRevealed(by: selection) || isInTable(span.range), .hiddenMarker:
                 text.addAttributes(concealedAttributes, range: span.range)
             case .strong:
                 convertFonts(in: span.range, of: text) { NSFontManager.shared.convert($0, toHaveTrait: .boldFontMask) }

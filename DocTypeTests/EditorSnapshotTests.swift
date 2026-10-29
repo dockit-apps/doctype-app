@@ -124,5 +124,70 @@ struct EditorSnapshotTests {
         let png = try #require(image.representation(using: .png, properties: [:]))
         try png.write(to: URL(fileURLWithPath: snapshotDirectory!).appending(path: "quote-after-return.png"))
     }
+
+    static let tables = """
+        Some text above the table, with a needle to find.
+
+        | Name | Notes | C |
+        | --- | --- | --- |
+        | Alpha | **bold** | x |
+        | Beta | a needle in a cell | y |
+        | Gamma | ok | z |
+
+        | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+        | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+        | alpha | beta | gamma | delta | epsilon | zeta | eta | theta | iota | kappa | lambda | mu |
+
+        Text after.
+        """
+
+    /// Tables in a wide window: a twelve-column one fits the text column, a
+    /// selection through a table, a cell being edited with its `**` shown,
+    /// and Find's highlights.
+    @Test(arguments: ["wide", "selection", "editing", "find"])
+    func renderTables(variant: String) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "DocTypeSnapshot-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.tables.write(to: folder.appending(path: "Tables.md"), atomically: true, encoding: .utf8)
+
+        let editor = EditorController()
+        editor.library = Library(root: folder)
+        #expect(await editor.open("Tables.md"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 520),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.scrollView
+        window.makeFirstResponder(editor.textView)
+        let text = editor.textView.string as NSString
+        let layOut = { if let layout = editor.textView.textLayoutManager { layout.ensureLayout(for: layout.documentRange) } }
+        layOut()
+        switch variant {
+        case "selection":
+            let start = text.range(of: "text above").location
+            editor.textView.setSelectedRange(NSRange(location: start, length: text.range(of: "| Beta").location + 4 - start))
+        case "editing":
+            let bold = text.range(of: "**bold**")
+            editor.textView.setSelectedRange(NSRange(location: bold.location + 3, length: 0))
+            try await Task.sleep(for: .milliseconds(50))  // the cell opens after the selection change
+        case "find":
+            let pasteboard = NSPasteboard(name: .find)
+            pasteboard.clearContents()
+            pasteboard.setString("needle", forType: .string)
+            editor.performFind(.showFindInterface)
+            editor.performFind(.setSearchString)
+            editor.performFind(.nextMatch)
+            editor.performFind(.nextMatch)
+        default:
+            break
+        }
+        layOut()
+        window.displayIfNeeded()
+
+        let view = editor.scrollView
+        let image = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: image)
+        let png = try #require(image.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: snapshotDirectory!).appending(path: "tables-\(variant).png"))
+    }
 }
 

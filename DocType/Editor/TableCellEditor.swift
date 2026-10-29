@@ -99,6 +99,13 @@ final class TableCellEditor: NSTextView {
         return max(layout.usageBoundsForTextContainer.height.rounded(.up), EditorTheme.emptyCellHeight)
     }
 
+    /// How wide its text is without wrapping: its longest line, as styled now.
+    var unwrappedTextWidth: CGFloat {
+        guard let storage = textStorage, storage.length > 0 else { return 0 }
+        return storage.boundingRect(with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+                                    options: [.usesLineFragmentOrigin, .usesFontLeading]).width.rounded(.up)
+    }
+
     /// Where the cursor is drawn, in this view's coordinates.
     var caretRect: CGRect {
         guard let window else { return .zero }

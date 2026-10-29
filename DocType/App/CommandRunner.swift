@@ -111,9 +111,11 @@ final class CommandRunner {
             model.selectedNotePath != nil
         case .searchNotes:
             model.hasUsableLibrary
-        case .addRowAbove, .addRowBelow, .addColumnLeft, .addColumnRight, .deleteRow, .deleteColumn,
+        case .addRowAbove, .addRowBelow, .deleteRow, .deleteColumn,
              .alignColumnLeft, .alignColumnCenter, .alignColumnRight:
             canEditText && model.editor.isInTable
+        case .addColumnLeft, .addColumnRight:
+            canEditText && model.editor.isInTable && model.editor.canAddTableColumn
         case .bold, .italic, .inlineCode, .link:
             canEditText
         case .heading1, .heading2, .heading3, .bodyText, .taskItem, .insertTable:

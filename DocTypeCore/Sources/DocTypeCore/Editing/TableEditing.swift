@@ -14,6 +14,10 @@
 //   keeping every cell's text, spacing and the row's indentation; adding or
 //   deleting a row only touches that row. The header row can't be deleted
 //   (GFM needs it), and neither can a table's last column.
+// - A table gets at most `maximumColumns` columns (the app passes how many
+//   fit its text column readably): past that, adding one is refused rather
+//   than squeezing every column or running off the page. A wider table
+//   written elsewhere still opens; it's only not made wider here.
 // Alternatives considered: re-formatting the whole table to padded columns on
 // every edit (makes diffs noisy, and the editor draws the columns anyway), and
 // Return inserting a new row always (then there's no quick way out of a table).
@@ -139,10 +143,13 @@ public enum TableEditing {
     // MARK: - Rows and columns
 
     /// Applies `operation` to the table at `location`. Nil outside a table or
-    /// when the operation isn't possible (deleting the header row or the last column).
-    public static func edit(_ operation: TableOperation, at location: Int, in text: NSString, blockMap: BlockMap) -> TextEdit? {
+    /// when the operation isn't possible (deleting the header row or the last
+    /// column, adding a column to a table with `maximumColumns`).
+    public static func edit(_ operation: TableOperation, at location: Int, in text: NSString, blockMap: BlockMap,
+                            maximumColumns: Int = .max) -> TextEdit? {
         guard let table = table(at: location, in: text, blockMap: blockMap),
               let (row, column) = table.position(of: location) else { return nil }
+        if operation == .addColumnLeft || operation == .addColumnRight, table.columnCount >= maximumColumns { return nil }
         var rows = table.cells.enumerated().map { index, cells in
             var texts = cells.map { text.substring(with: $0) }
             // Without a leading pipe, the row's indentation is part of its first cell.

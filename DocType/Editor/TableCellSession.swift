@@ -171,19 +171,21 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
     // MARK: - Layout
 
     /// Lays the editor over its cell, as wide as the column, and makes the row
-    /// as tall as the editor's text needs. Call after the note's text or the
-    /// editor's width changed.
+    /// as tall as the editor's text needs. Call after the note's text, the
+    /// editor's width or its shown markers changed.
     func placeEditor() {
         guard let cell, let storage = textView.textStorage else { return }
-        // The column's width decides how the text wraps, so how tall the row must
-        // be; the row's height never changes the width again.
+        // The column is at least as wide as the text with its markers shown; its
+        // width decides how the text wraps, so how tall the row must be. The
+        // row's height never changes the width again.
+        let width = editor.unwrappedTextWidth
         for _ in 0..<3 {
             guard let (frame, _) = textView.tableCellTextFrame(at: cell.location) else { return }
             editor.frame = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: max(editor.frame.height, 1))
-            let needed = editor.textHeight
-            editor.frame.size.height = needed
-            if let editing = owner.styler.editingTableCell, editing.location == cell.location, editing.height == needed { return }
-            owner.styler.editingTableCell = (cell.location, needed)
+            let needed = TableContext.EditingCell(location: cell.location, height: editor.textHeight, width: width)
+            editor.frame.size.height = needed.height
+            if owner.styler.editingTableCell == needed { return }
+            owner.styler.editingTableCell = needed
             owner.styler.restyle([NSRange(location: cell.location, length: 0)], in: storage)
         }
     }
@@ -234,7 +236,8 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         let previousRange = cell.contentRange
         let previous = storage.mutableString.substring(with: previousRange)
         if markdown != previous {
-            owner.styler.editingTableCell = (cell.location, editor.textHeight)
+            owner.styler.editingTableCell = TableContext.EditingCell(
+                location: cell.location, height: editor.textHeight, width: editor.unwrappedTextWidth)
             let undo = textView.undoManager
             var changed = false
             undo?.disableUndoRegistration()
@@ -272,5 +275,6 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         restyleEditor()  // markdown markers show on the cursor's line
+        if cell != nil, owner.styler.editingTableCell?.width != editor.unwrappedTextWidth { placeEditor() }
     }
 }
