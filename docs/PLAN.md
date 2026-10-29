@@ -489,6 +489,18 @@ Shared tooling:
 - Reduce Transparency and Increase Contrast both render correctly.
 - VoiceOver can move through sidebar → list → editor.
 
+### After the MVP — table fixes (2026-10-29)
+Found while testing the finished app; fixed on `mvp` before the first push.
+- **Width (decision):** a table never runs past the text column. A table a little too wide tightens its cell padding (down to 3 pt) before any column wraps, and a crowded one written elsewhere gives up padding before going wider. Adding columns stops at `EditorTheme.maximumTableColumns` (8: the text column divided by a 64 pt column plus padding). Core `TableEditing.edit(…, maximumColumns:)` refuses more, the "+" button hides, and the Add Column commands are disabled. A wider table from elsewhere still opens. Rejected: scrolling tables sideways (its own scrolling, hit-testing and cell-editor placement inside the note's text view) and letting tables use the full window width (breaks the readable column and still has no limit).
+- **Selection and Find:** the Markdown under a table is hidden, so the table draws the note's selection itself: whole cells, or the selected text when the selection is inside one cell. It's gray when the note doesn't have focus. Find's highlights and indicator come from the cells' layout: `MarkdownTextView+Find` overrides NSTextView's undeclared find-bar client methods (`rectsForCharacterRange:`, `drawCharactersInRange:forContentView:`) by selector. Rejected: a find bar of our own for the whole note.
+- **Markers:** drawn cells always hide `**` and other markers. The cell editor shows them on the cursor's line, and its column widens to fit them instead of wrapping.
+- **Rows without pipes (decision):** GFM goes on with a table until a blank line, so a line of text right under a table is a row, and GitHub shows it as one. The styler (cmark-gfm) drew such a line as a row, but editing only counted lines with pipes, so the row couldn't be edited. `TableEditing.table(at:)` now asks cmark-gfm about such lines, so the rows edited are the rows drawn. Leaving a table downward (Return on an empty last row, ↓, Escape) lands past a blank line. Typing, pasting or composing with an input method on the line right under a table puts a blank line in first (`editForTyping`, `editMakingRoomUnderTable`), except for text starting with `|`. Rejected: drawing such a line as a paragraph (then DocType and GitHub show the note differently).
+
+**Verify**
+- Core tests for the column limit, rows without pipes (and where a heading, list, quote or fence ends a table), leaving below, and typing under a table. App tests for the width, selection, Find's rectangles and drawing, the shown markers, the bug report's Return-Return-type sequence, a pipe-less row, pasting, and input-method composing.
+- Table lookups stay cheap: at most 0.04 ms in a 5,000-line note with no blank lines.
+- Known: a selection covering whole rows is also drawn by NSTextView to the right of the table. Tab from the last cell of a short row adds a row instead of going into the cells drawn to fill the row out.
+
 ---
 
 ## 6. Open questions (each blocks only the phase noted; until answered, the placeholder default applies)

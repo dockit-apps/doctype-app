@@ -334,20 +334,30 @@ public enum TableEditing {
         return cursor(next.location)
     }
 
-    /// Typing `typed` at `selection`: on a blank line right under a table, a
-    /// blank line goes in first, so the text doesn't become a row. Nil
-    /// anywhere else, and for typing a row by hand (starting with "|").
-    public static func editForTyping(_ typed: String, in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
-        guard !typed.isEmpty, !typed.hasPrefix("|"), !typed.hasPrefix("\n"), !typed.hasPrefix("\r"),
-              selection.location <= text.length else { return nil }
+    /// On a blank line right under a table, a blank line put in before it, so
+    /// what's written there doesn't become a row: the selection moves down with
+    /// it. Nil anywhere else. Used before an input method starts composing.
+    public static func editMakingRoomUnderTable(in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
+        guard selection.location <= text.length else { return nil }
         let line = lineContaining(selection.location, in: text)
         guard line.location > 0, isBlank(line, in: text), NSMaxRange(selection) <= line.upperBound,
               table(at: line.location - 1, in: text, blockMap: blockMap) != nil else { return nil }
-        let before = text.substring(with: NSRange(location: line.location, length: selection.location - line.location))
+        return TextEdit(range: NSRange(location: line.location, length: 0), replacement: "\n",
+                        selectionAfter: NSRange(location: selection.location + 1, length: selection.length))
+    }
+
+    /// Typing `typed` at `selection`: on a blank line right under a table, a
+    /// blank line goes in first (editMakingRoomUnderTable). Nil anywhere else,
+    /// and for typing a row by hand (starting with "|").
+    public static func editForTyping(_ typed: String, in text: NSString, selection: NSRange, blockMap: BlockMap) -> TextEdit? {
+        guard !typed.isEmpty, !typed.hasPrefix("|"), !typed.hasPrefix("\n"), !typed.hasPrefix("\r"),
+              let room = editMakingRoomUnderTable(in: text, selection: selection, blockMap: blockMap) else { return nil }
+        let lineStart = room.range.location
+        let before = text.substring(with: NSRange(location: lineStart, length: selection.location - lineStart))
         let replacement = "\n" + before + typed
-        return TextEdit(range: NSRange(location: line.location, length: NSMaxRange(selection) - line.location),
+        return TextEdit(range: NSRange(location: lineStart, length: NSMaxRange(selection) - lineStart),
                         replacement: replacement,
-                        selectionAfter: NSRange(location: line.location + (replacement as NSString).length, length: 0))
+                        selectionAfter: NSRange(location: lineStart + (replacement as NSString).length, length: 0))
     }
 
     /// Each `<br>` in `range`. Scanned on the NSString itself (no copy): this runs

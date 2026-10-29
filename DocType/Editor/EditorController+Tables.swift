@@ -15,6 +15,17 @@ extension EditorController {
             self?.tableCells.begin(cellAt: location, placing: .click(event))
         }
         textView.onInsertText = { [weak self] text, range in self?.insert(text, at: range) ?? false }
+        textView.onWillStartComposing = { [weak self] range in self?.makeRoomForComposing(at: range) }
+    }
+
+    /// An input method about to compose on the blank line right under a table:
+    /// a blank line goes in first, as for typing (its text arrives only when
+    /// composing ends, too late to keep it out of the table).
+    func makeRoomForComposing(at range: NSRange) {
+        guard textView.isEditable, let text = textView.textStorage?.mutableString,
+              let edit = TableEditing.editMakingRoomUnderTable(in: text, selection: range, blockMap: styler.blockMap)
+        else { return }
+        apply(edit)
     }
 
     /// Text typed or pasted on the blank line right under a table goes on a

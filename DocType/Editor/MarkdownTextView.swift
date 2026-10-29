@@ -68,6 +68,24 @@ final class MarkdownTextView: NSTextView {
         if hasMarkedText() || !onInsertText(text, range) { super.insertText(string, replacementRange: replacementRange) }
     }
 
+    /// Called with where an input method is about to start composing text
+    /// (Japanese, Chinese, accents held down); may change the text and move
+    /// the cursor first (see EditorController.makeRoomForComposing).
+    var onWillStartComposing: (_ range: NSRange) -> Void = { _ in }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        guard !hasMarkedText() else {
+            return super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        }
+        let before = self.selectedRange()
+        onWillStartComposing(replacementRange.location == NSNotFound ? before : replacementRange)
+        // The text may have moved: compose where the cursor is now.
+        let shift = self.selectedRange().location - before.location
+        let replacing = replacementRange.location == NSNotFound
+            ? replacementRange : NSRange(location: replacementRange.location + shift, length: replacementRange.length)
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacing)
+    }
+
     /// Called with files dropped or pasted into the editor and where they go.
     var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
 

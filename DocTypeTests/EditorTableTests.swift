@@ -493,6 +493,17 @@ struct EditorTableTests {
         NSPasteboard.general.setString("pasted", forType: .string)
         textView.paste(nil)
         #expect(textView.string == text + "\n\npasted\nx")
+
+        // An input method composing there (its text arrives only when it's done).
+        textView.setSelectedRange(NSRange(location: (text as NSString).length + 1, length: 0))
+        let nowhere = NSRange(location: NSNotFound, length: 0)
+        textView.setMarkedText("に", selectedRange: NSRange(location: 1, length: 0), replacementRange: nowhere)
+        textView.setMarkedText("にほ", selectedRange: NSRange(location: 2, length: 0), replacementRange: nowhere)
+        textView.insertText("日本", replacementRange: nowhere)
+        #expect(!textView.hasMarkedText())
+        #expect(textView.string == text + "\n\n日本\npasted\nx")
+        layOut(textView)
+        #expect(row(containing: "日本", in: editor) == nil)
     }
 
     /// A line without pipes under a table is a row for GFM, and drawn as one:

@@ -113,6 +113,7 @@ Other measurements:
 ## Known limitations
 
 - A selection that covers whole table rows is also drawn by NSTextView to the right of the table, as for any selected line break.
+- In a table row with fewer cells than the header, Tab from its last cell adds a row instead of going into the empty cells drawn to fill the row out, and those cells can't be clicked.
 - Bare URLs are links in the editor, through DocType's own detector (`BareURL`), because swift-markdown has no GFM autolink extension.
 - One app test, `thumbnailsAreDecodedSmall`, failed now and then in earlier runs (waiting for a thumbnail). It passed all 50 repeated runs in the last audit. The cause wasn't found.
 

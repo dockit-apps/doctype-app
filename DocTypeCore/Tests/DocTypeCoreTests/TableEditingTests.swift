@@ -182,6 +182,10 @@ struct TableEditingTests {
         #expect(type("| 2 |", "| A |\n|---|\n| 1 |\n^") == nil)  // a row typed by hand
         #expect(type("x", "text\n^") == nil)
         #expect(type("x", "```\n| A |\n|---|\n^") == nil)  // in a code block
+        // Before an input method composes there: only the blank line, the cursor moving with it.
+        let (text, cursor) = parse("| A |\n|---|\n^")
+        #expect(show(TableEditing.editMakingRoomUnderTable(in: text, selection: cursor, blockMap: BlockMap(text: text)), on: text)
+                == "| A |\n|---|\n\n^")
     }
 
     @Test func columnAlignmentComesFromTheDelimiterRow() {
