@@ -410,7 +410,8 @@ struct EditorTableTests {
         cellEditor.doCommand(by: #selector(NSResponder.moveDown(_:)))  // out below
         #expect(!cells.isEditing)
         #expect(editor.textView.window?.firstResponder === editor.textView)
-        #expect(editor.textView.selectedRange().location == (editor.textView.string as NSString).range(of: "\n\nbelow").location + 1)
+        // Past the blank line: typing right under the table would make a row.
+        #expect(editor.textView.selectedRange().location == (editor.textView.string as NSString).range(of: "below").location)
 
         #expect(cells.begin(cellAt: cell("A", in: editor), placing: .start))
         cellEditor.doCommand(by: #selector(NSResponder.moveLeft(_:)))  // out above
@@ -454,9 +455,72 @@ struct EditorTableTests {
         #expect(editor.textView.string == text + "\n|  |  |")
         #expect(cells.isEditing)
         cellEditor.doCommand(by: #selector(NSResponder.insertNewline(_:)))  // an empty last row: leave
-        #expect(editor.textView.string == text + "\n")
+        #expect(editor.textView.string == text + "\n\n")  // past a blank line
         #expect(!cells.isEditing)
-        #expect(editor.textView.selectedRange().location == (text as NSString).length + 1)
+        #expect(editor.textView.selectedRange().location == (text as NSString).length + 2)
+    }
+
+    /// The bug report: Return twice at the end of a table, then typing, put
+    /// the typed text back in the table as a row the editor couldn't edit.
+    @Test func typingAfterLeavingATableWithReturnStaysOutOfIt() async throws {
+        let text = "| test | Column 2 |\n| --- | --- |\n| test |  |"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let cells = editor.tableCells!
+
+        #expect(cells.begin(cellAt: cell("test |  |", in: editor), placing: .end))
+        cells.editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))  // a new row
+        cells.editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))  // empty: leave
+        #expect(window.firstResponder === textView)
+        textView.insertText("after", replacementRange: textView.selectedRange())
+        textView.insertText(" it", replacementRange: textView.selectedRange())
+        #expect(textView.string == text + "\n\nafter it")
+        layOut(textView)
+        #expect(row(containing: "after", in: editor) == nil)  // a paragraph, not a row
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!cells.isEditing)
+
+        // Clicking (or arrowing) onto the line right under a table and typing there.
+        textView.string = ""
+        textView.insertText(text + "\n", replacementRange: NSRange(location: 0, length: 0))
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+        textView.insertText("x", replacementRange: textView.selectedRange())
+        #expect(textView.string == text + "\n\nx")
+        // Pasting there too.
+        textView.setSelectedRange(NSRange(location: (text as NSString).length + 1, length: 0))
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("pasted", forType: .string)
+        textView.paste(nil)
+        #expect(textView.string == text + "\n\npasted\nx")
+    }
+
+    /// A line without pipes under a table is a row for GFM, and drawn as one:
+    /// it's edited like any other.
+    @Test func aRowWithoutPipesIsEditedLikeAnyOther() async throws {
+        let text = "| A | B |\n| --- | --- |\n| 1 | 2 |\nplain\n\nafter"
+        let (editor, folder, window) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let textView = editor.textView
+        let cells = editor.tableCells!
+        let plain = (textView.string as NSString).range(of: "plain")
+        #expect(row(containing: "plain", in: editor)?.cells.first?.text.string == "plain")
+
+        // The note's cursor arriving there opens the cell, over the drawn one.
+        textView.setSelectedRange(NSRange(location: plain.upperBound, length: 0))
+        try await waitUntil { cells.isEditing }
+        #expect(cells.cellLocation == plain.location)
+        #expect(window.firstResponder === cells.editor)
+        let drawn = try #require(textView.tableCellTextFrame(at: plain.location)).frame
+        #expect(abs(cells.editor.frame.minX - drawn.minX) < 1 && abs(cells.editor.frame.minY - drawn.minY) < 1)
+        type("ly", in: editor)
+        #expect(textView.string == "| A | B |\n| --- | --- |\n| 1 | 2 |\nplainly\n\nafter")
+        #expect(cells.editor.selectedRange() == NSRange(location: 7, length: 0))
+        #expect(cells.cellLocation == plain.location)
+        // Table commands work on it, and write it with pipes.
+        editor.performTableOperation(.addColumnRight)
+        #expect(textView.string.contains("|plainly|  |") || textView.string.contains("| plainly |  |")
+                || textView.string.contains("plainly|  |"))
     }
 
     @Test func arrowKeysFromTheTextOpenTheCellInTheirColumn() async throws {

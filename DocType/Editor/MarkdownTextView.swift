@@ -58,6 +58,16 @@ final class MarkdownTextView: NSTextView {
         return origin
     }
 
+    /// Called with text typed or pasted and where it goes, before it goes in;
+    /// true when it was handled (see EditorController.insert).
+    var onInsertText: (_ text: String, _ range: NSRange) -> Bool = { _, _ in false }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        let text = (string as? NSAttributedString)?.string ?? string as? String ?? ""
+        let range = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+        if hasMarkedText() || !onInsertText(text, range) { super.insertText(string, replacementRange: replacementRange) }
+    }
+
     /// Called with files dropped or pasted into the editor and where they go.
     var onAttach: (_ items: [IncomingAttachment], _ location: Int) -> Void = { _, _ in }
 

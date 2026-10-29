@@ -138,6 +138,52 @@ struct TableEditingTests {
         #expect(target(.backtab, 3, 0) == .cell(row: 2, column: 1))
     }
 
+    // MARK: Rows without pipes, and leaving
+
+    @Test func aLineOfTextRightUnderATableIsARowAsGFMReadsIt() {
+        let text = "intro\n| A | B |\n|---|---|\n| 1 | 2 |\nplain text\n| 3 | 4 |\n\nafter" as NSString
+        let blocks = BlockMap(text: text)
+        for piece in ["plain", "| 3", "| A", "| 1", "---|"] {
+            let found = TableEditing.table(at: text.range(of: piece).location + 1, in: text, blockMap: blocks)
+            #expect(found?.lines.count == 5, "at \(piece)")
+            #expect(found?.cells[3] == [text.range(of: "plain text")])
+        }
+        #expect(TableEditing.table(at: 2, in: text, blockMap: blocks) == nil)  // "intro" isn't a row
+        #expect(TableEditing.table(at: text.range(of: "after").location, in: text, blockMap: blocks) == nil)
+        // Another block starting there ends the table.
+        for block in ["# Heading", "- item", "> quote", "```"] {
+            let ended = "| A |\n|---|\n| 1 |\n\(block)" as NSString
+            #expect(TableEditing.table(at: ended.length - 1, in: ended, blockMap: BlockMap(text: ended)) == nil, "\(block)")
+            #expect(TableEditing.table(at: 0, in: ended, blockMap: BlockMap(text: ended))?.lines.count == 3, "\(block)")
+        }
+    }
+
+    @Test func leavingBelowLandsPastABlankLine() {
+        func leave(_ text: String) -> String? {
+            let string = text as NSString
+            let table = TableEditing.table(at: 0, in: string, blockMap: BlockMap(text: string))!
+            return show(TableEditing.editLeavingBelow(table, in: string), on: string)
+        }
+        #expect(leave("| A |\n|---|") == "| A |\n|---|\n\n^")
+        #expect(leave("| A |\n|---|\n") == "| A |\n|---|\n\n^")
+        #expect(leave("| A |\n|---|\n\n") == "| A |\n|---|\n\n^")
+        #expect(leave("| A |\n|---|\n\nnext") == "| A |\n|---|\n\n^next")
+        #expect(leave("| A |\n|---|\n# Heading") == "| A |\n|---|\n^# Heading")
+    }
+
+    @Test func typingRightUnderATablePutsABlankLineFirst() {
+        func type(_ typed: String, _ marked: String) -> String? {
+            let (text, selection) = parse(marked)
+            return show(TableEditing.editForTyping(typed, in: text, selection: selection, blockMap: BlockMap(text: text)), on: text)
+        }
+        #expect(type("x", "| A |\n|---|\n| 1 |\n^") == "| A |\n|---|\n| 1 |\n\nx^")
+        #expect(type("x", "| A |\n|---|\n| 1 |\n^\nafter") == "| A |\n|---|\n| 1 |\n\nx^\nafter")
+        #expect(type("x", "| A |\n|---|\n| 1 |\n\n^") == nil)  // past the blank line already
+        #expect(type("| 2 |", "| A |\n|---|\n| 1 |\n^") == nil)  // a row typed by hand
+        #expect(type("x", "text\n^") == nil)
+        #expect(type("x", "```\n| A |\n|---|\n^") == nil)  // in a code block
+    }
+
     @Test func columnAlignmentComesFromTheDelimiterRow() {
         let text = "| a | b | c |\n|:--|:-:|--:|" as NSString
         let table = TableEditing.table(at: 0, in: text, blockMap: BlockMap(text: text))!
@@ -150,9 +196,9 @@ struct TableEditingTests {
         #expect(target(.newline, 3, 1) == .addRow(column: 1))  // the last row has text
         let empty = "| A | B |\n|---|---|\n| 1 | 2 |\n|  |  |" as NSString
         #expect(target(.newline, 3, 0, in: empty) == .removeLastRowAndLeave)
+        // It goes, and the cursor lands after a blank line, where typing doesn't make a row.
         let edit = TableEditing.editRemovingLastRow(of: TableEditing.table(at: 0, in: empty, blockMap: BlockMap(text: empty))!, in: empty)
-        #expect(edit.applied(to: empty as String) == "| A | B |\n|---|---|\n| 1 | 2 |\n")
-        #expect(edit.selectionAfter == NSRange(location: empty.length - 7, length: 0))
+        #expect(show(edit, on: empty) == "| A | B |\n|---|---|\n| 1 | 2 |\n\n^")
         // The header row is never removed.
         let headerOnly = "|  |  |\n|---|---|" as NSString
         #expect(target(.newline, 0, 0, in: headerOnly) == .addRow(column: 0))

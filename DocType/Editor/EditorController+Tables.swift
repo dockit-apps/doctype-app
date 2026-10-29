@@ -14,6 +14,18 @@ extension EditorController {
         textView.onTableCellClick = { [weak self] location, event in
             self?.tableCells.begin(cellAt: location, placing: .click(event))
         }
+        textView.onInsertText = { [weak self] text, range in self?.insert(text, at: range) ?? false }
+    }
+
+    /// Text typed or pasted on the blank line right under a table goes on a
+    /// line of its own after a blank one (it would join the table as a row,
+    /// see TableEditing.editForTyping). False when it goes in as usual.
+    func insert(_ typed: String, at range: NSRange) -> Bool {
+        guard textView.isEditable, let text = textView.textStorage?.mutableString,
+              let edit = TableEditing.editForTyping(typed, in: text, selection: range, blockMap: styler.blockMap)
+        else { return false }
+        apply(edit)
+        return true
     }
 
     /// Applies `operation` to the table at `location` (default: the cell being

@@ -39,7 +39,9 @@ extension MarkdownTextView {
     }
 
     override func paste(_ sender: Any?) {
-        if !pasteAttachments(from: .general) { super.paste(sender) }
+        guard !pasteAttachments(from: .general) else { return }
+        if let text = NSPasteboard.general.string(forType: .string), onInsertText(text, selectedRange()) { return }
+        super.paste(sender)
     }
 
     /// Attaches files or image data on `pasteboard` at the cursor. False if there

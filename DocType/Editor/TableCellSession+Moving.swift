@@ -76,8 +76,8 @@ extension TableCellSession {
         return true
     }
 
-    /// Out of the table: to the end of the line above it, or the start of the
-    /// line below it (a new one when the table ends the note).
+    /// Out of the table: to the end of the line above it, or below it past a
+    /// blank line (TableEditing.editLeavingBelow).
     private func leave(_ table: TableLayout, above: Bool) {
         guard let storage = textView.textStorage else { return }
         let text = storage.mutableString
@@ -88,14 +88,8 @@ extension TableCellSession {
             self.end(placingCursorAt: end)
             return
         }
-        var lineEnd = 0
-        text.getLineStart(nil, end: &lineEnd, contentsEnd: nil, for: NSRange(location: NSMaxRange(table.range), length: 0))
-        if lineEnd > NSMaxRange(table.range) {
-            end(placingCursorAt: lineEnd)
-        } else {
-            end(placingCursorAt: nil)
-            owner.apply(TextEdit(range: NSRange(location: text.length, length: 0), replacement: "\n",
-                                 selectionAfter: NSRange(location: text.length + 1, length: 0)))
-        }
+        let edit = TableEditing.editLeavingBelow(table, in: text)
+        end(placingCursorAt: nil)
+        owner.apply(edit)  // only moves the cursor, unless lines are added at the end
     }
 }
