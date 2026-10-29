@@ -78,3 +78,7 @@ To try the app with it, choose `~/DocTypeFixtures` as the library. The budgets a
 - `docs/PLAN.md`: the MVP plan, with the decisions made along the way.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
