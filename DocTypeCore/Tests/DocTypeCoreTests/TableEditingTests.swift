@@ -4,6 +4,7 @@
 
 import Foundation
 import Testing
+import Markdown
 @testable import DocTypeCore
 
 struct TableEditingTests {
@@ -51,6 +52,9 @@ struct TableEditingTests {
         // A `|---|` row with fewer cells than the header: GFM draws a paragraph.
         let mismatched = "| a | b |\n|---|\n| 1 | 2 |" as NSString
         #expect(TableEditing.table(at: 2, in: mismatched, blockMap: BlockMap(text: mismatched)) == nil)
+        // A pipe after any backslash is text, as for cmark-gfm: one cell.
+        let escaped = "| a |\n|---|\n|x\\\\|y|" as NSString
+        #expect(TableEditing.table(at: 0, in: escaped, blockMap: BlockMap(text: escaped))?.cells[2].count == 1)
     }
 
     @Test func findsASecondTableAfterAHeadingWithoutBlankLines() {
@@ -81,6 +85,16 @@ struct TableEditingTests {
     @Test func addingColumnsKeepsCellsAndIndentation() {
         #expect(run(.addColumnRight, "| A | B |\n|---|:-:|\n| 1^ | 2 |") == "| A |  | B |\n|---| --- |:-:|\n| 1 | ^ | 2 |")
         #expect(run(.addColumnLeft, "  a | b\n  --|--\n  ^1 | 2") == "  |  |a | b|\n  | --- |--|--|\n  | ^ |1 | 2|")
+    }
+
+    @Test func rowsKeepTheirOwnIndentationWhenOthersComeAndGo() {
+        let indented = "| a | b |\n|---|---|\n  | 1 | 2 |\n| 3 | 4 |"
+        #expect(run(.addRowBelow, indented.replacingOccurrences(of: "| a ", with: "| a^ "))
+                == "| a | b |\n|---|---|\n| ^ |  |\n  | 1 | 2 |\n| 3 | 4 |")
+        #expect(run(.deleteRow, indented.replacingOccurrences(of: "| 1 ", with: "| 1^ "))
+                == "| a | b |\n|---|---|\n| ^3 | 4 |")
+        #expect(run(.addRowBelow, indented.replacingOccurrences(of: "| 1 ", with: "| 1^ "))
+                == "| a | b |\n|---|---|\n  | 1 | 2 |\n  | ^ |  |\n| 3 | 4 |")  // like the row above
     }
 
     @Test func columnsStopAtTheMaximum() {
@@ -216,6 +230,12 @@ struct TableEditingTests {
         let (text, cursor) = parse("| A |\n|---|\n^")
         #expect(show(TableEditing.editMakingRoomUnderTable(in: text, selection: cursor, blockMap: BlockMap(text: text)), on: text)
                 == "| A |\n|---|\n\n^")
+        // Composing ended with nothing written (Escape after a dead key): the blank line goes again.
+        let (made, after) = parse("| A |\n|---|\n\n^")
+        #expect(show(TableEditing.editTakingBackRoom(at: cursor.location, in: made, selection: after), on: made)
+                == "| A |\n|---|\n^")
+        let (written, end) = parse("| A |\n|---|\n\né^")
+        #expect(TableEditing.editTakingBackRoom(at: cursor.location, in: written, selection: end) == nil)
     }
 
     @Test func columnAlignmentComesFromTheDelimiterRow() {
@@ -233,6 +253,17 @@ struct TableEditingTests {
         // It goes, and the cursor lands after a blank line, where typing doesn't make a row.
         let edit = TableEditing.editRemovingLastRow(of: TableEditing.table(at: 0, in: empty, blockMap: BlockMap(text: empty))!, in: empty)
         #expect(show(edit, on: empty) == "| A | B |\n|---|---|\n| 1 | 2 |\n\n^")
+        // Blank lines already under it are used: doing it again adds none.
+        func remove(_ text: String) -> String? {
+            let string = text as NSString
+            return show(TableEditing.editRemovingLastRow(of: TableEditing.table(at: 0, in: string, blockMap: BlockMap(text: string))!,
+                                                         in: string), on: string)
+        }
+        #expect(remove("| A |\n|---|\n| 1 |\n|  |\n\nNext") == "| A |\n|---|\n| 1 |\n\n^\n\nNext")
+        #expect(remove("| A |\n|---|\n| 1 |\n|  |\n\n\n\nNext") == "| A |\n|---|\n| 1 |\n\n^\n\nNext")
+        #expect(remove("| A |\n|---|\n| 1 |\n|  |\n") == "| A |\n|---|\n| 1 |\n\n^")
+        #expect(remove("| A |\n|---|\n| 1 |\n|  |\n\n") == "| A |\n|---|\n| 1 |\n\n^")
+        #expect(remove("| A |\n|---|\n| 1 |\n|  |\n# Heading") == "| A |\n|---|\n| 1 |\n\n^\n\n# Heading")
         // The header row is never removed.
         let headerOnly = "|  |  |\n|---|---|" as NSString
         #expect(target(.newline, 0, 0, in: headerOnly) == .addRow(column: 0))
@@ -250,11 +281,33 @@ struct TableCellTextTests {
     @Test func editorTextIsWrittenBackAsMarkdown() {
         #expect(TableCellText.markdown(fromEditorText: "one\ntwo") == "one<br>two")
         #expect(TableCellText.markdown(fromEditorText: "a|b") == "a\\|b")
-        #expect(TableCellText.markdown(fromEditorText: "a\\|b") == "a\\|b")  // already escaped
+        #expect(TableCellText.markdown(fromEditorText: "a\\|b") == "a\\\\\\|b")  // "\" and "|" both kept
+        #expect(TableCellText.markdown(fromEditorText: "a\\") == "a\\")  // nothing to escape
         #expect(TableCellText.markdown(fromEditorText: "x\r\ny") == "x<br>y")
         // Round trip.
         let markdown = "one<br>two \\| three<br>"
         #expect(TableCellText.markdown(fromEditorText: TableCellText(markdown: markdown).editorText) == markdown)
+    }
+
+    /// What's typed in a cell is what the cell shows when it's opened again,
+    /// and GFM shows it as it would the same markdown outside a table: pipes
+    /// and the backslashes before them aren't special in a cell. Backslashes
+    /// and pipes in any order.
+    @Test func backslashesAndPipesReadBackAsTyped() {
+        let pieces = ["a", "\\", "|"]
+        var texts = [""]
+        for _ in 0..<5 { texts = texts.flatMap { text in pieces.map { text + $0 } } }
+        for typed in texts where !typed.isEmpty {
+            let markdown = TableCellText.markdown(fromEditorText: typed)
+            #expect(TableCellText(markdown: markdown).editorText == typed, "\(typed)")
+            let table = "| h |\n|---|\n| \(markdown) |"
+            let cell = (Document(parsing: table).child(at: 0) as? Table)?.body.child(at: 0)?.child(at: 0) as? Table.Cell
+            let paragraph = Document(parsing: markdown).child(at: 0) as? Paragraph
+            #expect(cell != nil && cell?.plainText == paragraph?.plainText, "\(typed) as \(markdown)")
+        }
+        // Written by hand: shown as GFM reads it.
+        #expect(TableCellText(markdown: "a\\\\|b").editorText == "a|b")
+        #expect(TableCellText(markdown: "a\\\\\\|b").editorText == "a\\|b")
     }
 
     @Test func offsetsMapBothWays() {

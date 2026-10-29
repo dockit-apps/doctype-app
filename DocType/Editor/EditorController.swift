@@ -55,6 +55,8 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// ↑ or ↓ was just pressed in the note: where the cursor was across, so a
     /// table it moves into opens the cell in that column.
     @ObservationIgnored var pendingVerticalMove: (x: CGFloat, up: Bool)?
+    /// Where makeRoomForComposing put a blank line in, until composing ends.
+    @ObservationIgnored var roomForComposing: Int?
     @ObservationIgnored private var textViewHasFocus = false
     @ObservationIgnored private var cellEditorHasFocus = false
 

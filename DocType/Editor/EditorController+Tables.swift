@@ -16,6 +16,7 @@ extension EditorController {
         }
         textView.onInsertText = { [weak self] text, range in self?.insert(text, at: range) ?? false }
         textView.onWillStartComposing = { [weak self] range in self?.makeRoomForComposing(at: range) }
+        textView.onComposingEnded = { [weak self] in self?.composingEnded() }
     }
 
     /// An input method about to compose on the blank line right under a table:
@@ -24,6 +25,18 @@ extension EditorController {
     func makeRoomForComposing(at range: NSRange) {
         guard textView.isEditable, let text = textView.textStorage?.mutableString,
               let edit = TableEditing.editMakingRoomUnderTable(in: text, selection: range, blockMap: styler.blockMap)
+        else { return }
+        apply(edit)
+        roomForComposing = edit.range.location
+    }
+
+    /// Composing ended: if nothing was written after all (an accent's dead
+    /// key, then Escape), the blank line put in for it goes again.
+    func composingEnded() {
+        guard let room = roomForComposing else { return }
+        roomForComposing = nil
+        guard textView.isEditable, let text = textView.textStorage?.mutableString,
+              let edit = TableEditing.editTakingBackRoom(at: room, in: text, selection: textView.selectedRange())
         else { return }
         apply(edit)
     }

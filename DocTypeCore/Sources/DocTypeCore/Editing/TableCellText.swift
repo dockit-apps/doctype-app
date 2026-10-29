@@ -1,8 +1,9 @@
 // One table cell's text as the editor shows it, and back to markdown.
 //
 // In the note a cell is part of one line: a line break in it is written `<br>`
-// and a "|" in its text `\|`. The editor shows a real line break and a plain
-// "|", and every keystroke there is written back with `markdown(fromEditorText:)`.
+// and a "|" in its text `\|` (a "\" right before one `\\`). The editor shows a
+// real line break and a plain "|", and every keystroke there is written back
+// with `markdown(fromEditorText:)`.
 // Offsets map both ways, so a cursor or selection in the markdown (a find
 // match, an undo) can be shown in the editor, and the other way round.
 // Alternative considered: editing the markdown as is, `<br>` and all; that's
@@ -31,11 +32,26 @@ public struct TableCellText: Equatable, Sendable {
                 offsets.append(index)
                 index = breaks[nextBreak].upperBound
                 nextBreak += 1
-            } else if source.character(at: index) == 92, index + 1 < source.length,
-                      source.character(at: index + 1) == 124 {  // "\|"
+            } else if source.character(at: index) == 92 {  // "\"
+                // Backslashes, then "|": cmark-gfm makes the last "\|" a "|" and
+                // each "\\" before it a "\" (and drops one left over).
+                var end = index
+                while end < source.length, source.character(at: end) == 92 { end += 1 }
+                guard end < source.length, source.character(at: end) == 124 else {
+                    for location in index..<end {
+                        shown.append(92)
+                        offsets.append(location)
+                    }
+                    index = end
+                    continue
+                }
+                for backslash in 0..<(end - index - 1) / 2 {
+                    shown.append(92)
+                    offsets.append(index + 2 * backslash)
+                }
                 shown.append(124)
-                offsets.append(index)
-                index += 2
+                offsets.append(end - 1)
+                index = end + 1
             } else {
                 shown.append(source.character(at: index))
                 offsets.append(index)
@@ -70,13 +86,15 @@ public struct TableCellText: Equatable, Sendable {
         return NSRange(location: start, length: adjustedEnd - start)
     }
 
-    /// The markdown for what's in the editor: line breaks become `<br>`, and a
-    /// "|" becomes `\|` (one already written `\|` stays as it is).
+    /// The markdown for what's in the editor: line breaks become `<br>`, a "|"
+    /// becomes `\|`, and each "\" right before a "|" `\\` (a "\|" typed reads
+    /// "\|": `\\\|`). Read back with `init(markdown:)`, it's the same text.
     public static func markdown(fromEditorText text: String) -> String {
         let source = text as NSString
         var result: [unichar] = []
         result.reserveCapacity(source.length)
         var index = 0
+        var backslashes = 0  // right before `index`, already written
         while index < source.length {
             let character = source.character(at: index)
             switch character {
@@ -85,11 +103,12 @@ public struct TableCellText: Equatable, Sendable {
                 index += 1
             case 10, 13, 0x2028, 0x2029:  // line breaks
                 result += Array("<br>".utf16)
-            case 124 where index == 0 || source.character(at: index - 1) != 92:  // "|", not after "\"
-                result += [92, 124]
+            case 124:  // "|"
+                result += Array(repeating: 92, count: backslashes + 1) + [124]
             default:
                 result.append(character)
             }
+            backslashes = character == 92 ? backslashes + 1 : 0
             index += 1
         }
         return String(utf16CodeUnits: result, count: result.count)

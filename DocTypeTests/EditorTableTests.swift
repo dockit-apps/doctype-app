@@ -504,6 +504,35 @@ struct EditorTableTests {
         #expect(textView.string == text + "\n\n日本\npasted\nx")
         layOut(textView)
         #expect(row(containing: "日本", in: editor) == nil)
+
+        // Composing there, then nothing (Escape after an accent's dead key): nothing is left behind.
+        let underTable = NSRange(location: (text as NSString).length + 1, length: 0)
+        let composed = textView.string
+        textView.setSelectedRange(underTable)
+        textView.setMarkedText("", selectedRange: NSRange(location: 0, length: 0), replacementRange: nowhere)
+        #expect(textView.string == composed)  // an empty one doesn't start composing
+        textView.setMarkedText("´", selectedRange: NSRange(location: 1, length: 0), replacementRange: nowhere)
+        #expect(textView.string != composed)
+        textView.setMarkedText("", selectedRange: NSRange(location: 0, length: 0), replacementRange: nowhere)
+        textView.unmarkText()
+        #expect(textView.string == composed)
+        #expect(textView.selectedRange() == underTable)
+    }
+
+    /// A "\" typed last in a cell written without spaces doesn't escape the
+    /// pipe after it, and a "\|" typed reads "\|" in the note and the cell.
+    @Test func backslashesTypedInACellStayInIt() async throws {
+        let text = "|a|b|\n|---|---|\n|1|2|"
+        let (editor, folder, _) = try await editor(showing: text)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cells = editor.tableCells!
+        #expect(cells.begin(cellAt: cell("1|2|", in: editor), placing: .end))
+        type("\\", in: editor)
+        #expect(editor.textView.string == "|a|b|\n|---|---|\n|1\\ |2|")
+        type("|", in: editor)
+        #expect(editor.textView.string == "|a|b|\n|---|---|\n|1\\\\\\| |2|")
+        #expect(cells.editor.string == "1\\|")
+        #expect(cells.cell?.text.editorText == cells.editor.string)
     }
 
     /// A line without pipes under a table is a row for GFM, and drawn as one:

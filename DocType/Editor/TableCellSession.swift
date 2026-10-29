@@ -234,15 +234,20 @@ final class TableCellSession: NSObject, NSTextViewDelegate {
         let markdown = TableCellText.markdown(fromEditorText: editor.string)
         cell.text = TableCellText(markdown: markdown)
         let previousRange = cell.contentRange
-        let previous = storage.mutableString.substring(with: previousRange)
+        let text = storage.mutableString
+        let previous = text.substring(with: previousRange)
         if markdown != previous {
             owner.styler.editingTableCell = TableContext.EditingCell(
                 location: cell.location, height: editor.textHeight, width: editor.unwrappedTextWidth)
+            // A "\" last, right before the cell's closing pipe, would escape it and
+            // join the next cell to this one: a space (padding) keeps them apart.
+            let closesRightAfter = previousRange.upperBound < text.length && text.character(at: previousRange.upperBound) == 124
+            let written = markdown.hasSuffix("\\") && closesRightAfter ? markdown + " " : markdown
             let undo = textView.undoManager
             var changed = false
             undo?.disableUndoRegistration()
-            if textView.shouldChangeText(in: previousRange, replacementString: markdown) {
-                storage.replaceCharacters(in: previousRange, with: markdown)
+            if textView.shouldChangeText(in: previousRange, replacementString: written) {
+                storage.replaceCharacters(in: previousRange, with: written)
                 cell.contentRange.length = (markdown as NSString).length
                 self.cell = cell
                 changed = true

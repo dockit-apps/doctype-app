@@ -67,12 +67,12 @@ public enum TableEditing {
               let block = blockMap.blocks(in: NSRange(location: location, length: 0)).first,
               block.kind == .text, NSMaxRange(block.range) <= text.length,
               !isBlank(lineContaining(location, in: text), in: text) else { return nil }
-        // This runs on every keystroke and selection change: only a block that
-        // could hold a table is parsed (a table never spans a blank line, so
-        // never more than one block).
-        guard text.range(of: "|", options: .literal, range: block.range).location != NSNotFound else { return nil }
-        let source = text.substring(with: block.range)
-        guard delimiterRow.firstMatch(in: source, range: NSRange(location: 0, length: block.range.length)) != nil
+        // This runs on every keystroke and selection change: only the lines
+        // around `location` that could hold a table are parsed.
+        let window = lines(around: location, within: block.range, in: text)
+        guard text.range(of: "|", options: .literal, range: window).location != NSNotFound else { return nil }
+        let source = text.substring(with: window)
+        guard delimiterRow.firstMatch(in: source, range: NSRange(location: 0, length: window.length)) != nil
         else { return nil }
         let mapping = SourceMapping(source)
         for table in tables(in: Document(parsing: source)) {
@@ -80,7 +80,7 @@ public enum TableEditing {
                   let rows = TableRowParsing.rows(ofTableAt: range, in: source as NSString) else { continue }
             // cmark-gfm starts a row after its indentation; the row's line starts before it.
             let lines = rows.map { local in
-                let row = NSRange(location: block.range.location + local.location, length: local.length)
+                let row = NSRange(location: window.location + local.location, length: local.length)
                 let line = lineContaining(row.location, in: text)
                 let indentation = NSRange(location: line.location, length: row.location - line.location)
                 return isBlank(indentation, in: text) ? line : NSRange(location: row.location, length: line.upperBound - row.location)
@@ -95,6 +95,34 @@ public enum TableEditing {
         }
         return nil
     }
+
+    /// The lines up and down from `location` to a blank line or the block's
+    /// edge: a table never spans a blank line. Not past `maximumPlainLines`
+    /// lines in a row without pipes (a long list or paragraph), so a note
+    /// without blank lines isn't parsed whole for each lookup; a table starting
+    /// further up is still found, as it has a pipe on each of its first lines.
+    private static func lines(around location: Int, within block: NSRange, in text: NSString) -> NSRange {
+        let here = lineContaining(location, in: text)
+        let hasPipe = { (line: NSRange) in text.range(of: "|", options: .literal, range: line).location != NSNotFound }
+        var top = here, plain = 0
+        while top.location > block.location, plain < maximumPlainLines {
+            let previous = lineContaining(top.location - 1, in: text)
+            guard !isBlank(previous, in: text) else { break }
+            plain = hasPipe(previous) ? 0 : plain + 1
+            top = previous
+        }
+        var bottom = here
+        plain = 0
+        while plain < maximumPlainLines, let next = line(after: bottom, in: text), next.upperBound <= NSMaxRange(block),
+              !isBlank(next, in: text) {
+            plain = hasPipe(next) ? 0 : plain + 1
+            bottom = next
+        }
+        return NSRange(location: top.location, length: bottom.upperBound - top.location)
+    }
+
+    /// Lines without pipes in a row looked at around a table: bounds a lookup's work.
+    static let maximumPlainLines = 50
 
     /// Every table in `markup`, nested ones (in a list item) too.
     private static func tables(in markup: Markup) -> [Table] {
@@ -178,6 +206,8 @@ public enum TableEditing {
             }
             return texts + Array(repeating: "  ", count: max(0, table.columnCount - cells.count))
         }
+        // Each row keeps its indentation; a new row takes the one of the row above it.
+        var indents = table.indents
         let isDelimiter = { (index: Int) in index == 1 }
         var target = (row: row, column: column)
 
@@ -186,6 +216,7 @@ public enum TableEditing {
             // Above the header or below it (on the delimiter) both mean "the first body row".
             let index = operation == .addRowAbove ? max(row, 2) : max(row + 1, 2)
             rows.insert(Array(repeating: "  ", count: table.columnCount), at: index)
+            indents.insert(indents[index - 1], at: index)
             target.row = index
         case .addColumnLeft, .addColumnRight:
             let index = operation == .addColumnLeft ? column : column + 1
@@ -194,6 +225,7 @@ public enum TableEditing {
         case .deleteRow:
             guard row >= 2 else { return nil }
             rows.remove(at: row)
+            indents.remove(at: row)
             target.row = min(row, rows.count - 1)
         case .deleteColumn:
             guard table.columnCount > 1 else { return nil }
@@ -209,16 +241,13 @@ public enum TableEditing {
             rows[1][column] = " \(dashes) "
         }
 
-        let lines = rows.enumerated().map { index, cells in
-            let indent = index < table.indents.count ? table.indents[index] : table.indents[0]
-            return indent + "|" + cells.joined(separator: "|") + "|"
-        }
+        let lines = zip(indents, rows).map { indent, cells in indent + "|" + cells.joined(separator: "|") + "|" }
         let replacement = lines.joined(separator: "\n")
         // Put the cursor inside the target cell (after its first space).
         let lineStart = lines[..<target.row].reduce(table.range.location) { $0 + ($1 as NSString).length + 1 }
         let line = lines[target.row] as NSString
         let cellsBefore = rows[target.row][..<min(target.column, rows[target.row].count)]
-        let offset = (table.indents[min(target.row, table.indents.count - 1)] as NSString).length + 1
+        let offset = (indents[target.row] as NSString).length + 1
             + cellsBefore.reduce(0) { $0 + ($1 as NSString).length + 1 }
         let cursor = lineStart + min(offset + 1, line.length)
         return TextEdit(range: table.range, replacement: replacement, selectionAfter: NSRange(location: cursor, length: 0))
@@ -286,10 +315,27 @@ public enum TableEditing {
     // line as you start typing, every time).
 
     /// Removes the table's (empty) last row and leaves the table below, on an
-    /// empty line after a blank one.
+    /// empty line after a blank one (and before one, when text follows). Blank
+    /// lines already there are used, so doing it again doesn't add more.
     public static func editRemovingLastRow(of table: TableLayout, in text: NSString) -> TextEdit {
         let last = table.lines[table.lines.count - 1]
-        return TextEdit(range: last, replacement: "\n", selectionAfter: NSRange(location: last.location + 1, length: 0))
+        var blanks: [NSRange] = []
+        var after = line(after: last, in: text)
+        while let under = after, isBlank(under, in: text) {
+            blanks.append(under)
+            after = line(after: under, in: text)
+        }
+        // A blank line, the cursor's line, and a blank line before the text after.
+        let missing = (after == nil ? 2 : 3) - blanks.count
+        guard missing <= 0 else {
+            // The row's line is the first of them.
+            return TextEdit(range: last, replacement: String(repeating: "\n", count: missing - 1),
+                            selectionAfter: NSRange(location: last.location + 1, length: 0))
+        }
+        // Enough already: the row goes, with the line break before it.
+        let removed = NSRange(location: last.location - 1, length: last.length + 1)
+        return TextEdit(range: removed, replacement: "",
+                        selectionAfter: NSRange(location: blanks[1].location - removed.length, length: 0))
     }
 
     /// Leaves the table below: to the line after the blank line under it,
@@ -320,6 +366,18 @@ public enum TableEditing {
               table(at: line.location - 1, in: text, blockMap: blockMap) != nil else { return nil }
         return TextEdit(range: NSRange(location: line.location, length: 0), replacement: "\n",
                         selectionAfter: NSRange(location: selection.location + 1, length: selection.length))
+    }
+
+    /// Takes back the blank line editMakingRoomUnderTable put in at `room`
+    /// when nothing was written after all: the line after it is still blank,
+    /// the cursor on it. Nil otherwise.
+    public static func editTakingBackRoom(at room: Int, in text: NSString, selection: NSRange) -> TextEdit? {
+        guard room < text.length, text.character(at: room) == 10, selection.length == 0 else { return nil }  // "\n"
+        let line = lineContaining(room + 1, in: text)
+        guard line.location == room + 1, isBlank(line, in: text),
+              selection.location >= line.location, selection.location <= line.upperBound else { return nil }
+        return TextEdit(range: NSRange(location: room, length: 1), replacement: "",
+                        selectionAfter: NSRange(location: selection.location - 1, length: 0))
     }
 
     /// Typing `typed` at `selection`: on a blank line right under a table, a

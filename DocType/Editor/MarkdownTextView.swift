@@ -65,16 +65,27 @@ final class MarkdownTextView: NSTextView {
     override func insertText(_ string: Any, replacementRange: NSRange) {
         let text = (string as? NSAttributedString)?.string ?? string as? String ?? ""
         let range = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
-        if hasMarkedText() || !onInsertText(text, range) { super.insertText(string, replacementRange: replacementRange) }
+        let wasComposing = hasMarkedText()
+        if wasComposing || !onInsertText(text, range) { super.insertText(string, replacementRange: replacementRange) }
+        if wasComposing { onComposingEnded() }
     }
 
     /// Called with where an input method is about to start composing text
     /// (Japanese, Chinese, accents held down); may change the text and move
     /// the cursor first (see EditorController.makeRoomForComposing).
     var onWillStartComposing: (_ range: NSRange) -> Void = { _ in }
+    /// Called when composing ends: its text went in, or nothing did (Escape
+    /// after an accent's dead key).
+    var onComposingEnded: () -> Void = {}
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         guard !hasMarkedText() else {
+            super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+            if !hasMarkedText() { onComposingEnded() }  // emptied
+            return
+        }
+        let composing = (string as? NSAttributedString)?.string ?? string as? String ?? ""
+        guard !composing.isEmpty else {
             return super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
         }
         let before = self.selectedRange()
@@ -84,6 +95,12 @@ final class MarkdownTextView: NSTextView {
         let replacing = replacementRange.location == NSNotFound
             ? replacementRange : NSRange(location: replacementRange.location + shift, length: replacementRange.length)
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacing)
+    }
+
+    override func unmarkText() {
+        let wasComposing = hasMarkedText()
+        super.unmarkText()
+        if wasComposing { onComposingEnded() }
     }
 
     /// Called with files dropped or pasted into the editor and where they go.

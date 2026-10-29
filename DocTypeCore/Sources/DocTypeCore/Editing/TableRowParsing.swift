@@ -5,16 +5,17 @@ import Foundation
 
 /// Splitting a table row into cells, shared by styling and editing.
 enum TableRowParsing {
-    /// The text of each cell and where the pipes are (`\|` is not a pipe). Text
+    /// The text of each cell and where the pipes are (`\|` is not a pipe, nor `\\|`). Text
     /// before the first pipe or after the last one is a cell only if it isn't
     /// blank (`a | b` has two cells, `| a | b |` too).
     static func cells(in line: NSRange, of source: NSString) -> (cells: [NSRange], pipes: [Int]) {
         var pipes: [Int] = []
-        var backslashes = 0
+        var previous: unichar = 0
         for location in line.location..<line.upperBound {
             let character = source.character(at: location)
-            if character == 124, backslashes % 2 == 0 { pipes.append(location) }  // "|"
-            backslashes = character == 92 ? backslashes + 1 : 0  // "\"
+            // A "|" after any backslash, even "\\|", isn't a pipe for cmark-gfm.
+            if character == 124, previous != 92 { pipes.append(location) }
+            previous = character
         }
         let bounds = [line.location - 1] + pipes + [line.upperBound]
         func isBlank(_ range: NSRange) -> Bool {
